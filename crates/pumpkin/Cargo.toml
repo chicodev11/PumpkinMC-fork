@@ -26,6 +26,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing.workspace = true
 console-subscriber = { workspace = true, optional = true }
 
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc.workspace = true
+
 [features]
 # The fork's Rust SDK (`pumpkin-plugin-api`) targets the v0.2 API, so its host is on by default.
 default = ["plugin-v0_2"]
