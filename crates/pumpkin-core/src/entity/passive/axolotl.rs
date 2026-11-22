@@ -233,12 +233,12 @@ fn supporting_regeneration_duration(current: Option<(i32, i32)>) -> Option<i32> 
 
 /// Vanilla `Axolotl.applySupportingEffects`: regeneration for the player (see
 /// [`supporting_regeneration_duration`]) and the end of mining fatigue.
-fn apply_supporting_effects(player: &Player, axolotl: &dyn EntityBase) {
+fn apply_supporting_effects(player: &Player, source: &dyn EntityBase) {
     let current = player
         .get_effect(&StatusEffect::REGENERATION)
         .map(|effect| (effect.duration, i32::from(effect.amplifier)));
     if let Some(duration) = supporting_regeneration_duration(current) {
-        player.add_effect_from(
+        player.add_effect_with_source(
             Effect {
                 effect_type: &StatusEffect::REGENERATION,
                 duration,
@@ -248,7 +248,7 @@ fn apply_supporting_effects(player: &Player, axolotl: &dyn EntityBase) {
                 show_icon: true,
                 blend: false,
             },
-            Some(axolotl),
+            source,
         );
     }
     player.remove_effect(&StatusEffect::MINING_FATIGUE);

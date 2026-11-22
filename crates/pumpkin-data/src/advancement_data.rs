@@ -312,10 +312,8 @@ pub enum AdvancementCondition {
     StartedRiding(Option<EntityCondition>),
     SummonedEntity(EntityCondition),
     CrafterRecipeCrafted(&'static str),
-    /// Vanilla `EffectsChangedTrigger`: all `effects` active, and the entity that changed them
-    /// matching `source` when set.
     EffectsChanged {
-        effects: &'static [&'static str],
+        effects: &'static [MobEffectCondition],
         source: Option<EntityCondition>,
     },
     SpearMobs {
@@ -389,7 +387,9 @@ pub struct EntityCondition {
     pub tag: Option<&'static str>,
     pub is_baby: Option<bool>,
     pub distance_horizontal_min: Option<f64>,
+    pub distance_horizontal_max: Option<f64>,
     pub distance_absolute_min: Option<f64>,
+    pub distance_absolute_max: Option<f64>,
     pub vehicle_type: Option<&'static str>,
     pub vehicle_tag: Option<&'static str>,
     pub passenger_type: Option<&'static str>,
@@ -397,6 +397,17 @@ pub struct EntityCondition {
     pub looking_at: Option<&'static str>,
     pub feet_item: Option<&'static str>,
     pub safe_armor_disallowed: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct MobEffectCondition {
+    pub effect: &'static str,
+    pub amplifier_min: Option<i32>,
+    pub amplifier_max: Option<i32>,
+    pub duration_min: Option<i32>,
+    pub duration_max: Option<i32>,
+    pub ambient: Option<bool>,
+    pub visible: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]

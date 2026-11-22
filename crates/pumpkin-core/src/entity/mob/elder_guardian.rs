@@ -107,15 +107,18 @@ impl Mob for ElderGuardianEntity {
                     continue;
                 }
                 player.try_send_client_packet(&packet);
-                player.living_entity.add_effect(Effect {
-                    effect_type: &StatusEffect::MINING_FATIGUE,
-                    duration: EFFECT_DURATION,
-                    amplifier: EFFECT_AMPLIFIER,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                });
+                player.add_effect_with_source(
+                    Effect {
+                        effect_type: &StatusEffect::MINING_FATIGUE,
+                        duration: EFFECT_DURATION,
+                        amplifier: EFFECT_AMPLIFIER,
+                        ambient: false,
+                        show_particles: true,
+                        show_icon: true,
+                        blend: false,
+                    },
+                    self,
+                );
             }
         }
         if mob_entity.position_target_range.load(Ordering::Relaxed) < 0 {
