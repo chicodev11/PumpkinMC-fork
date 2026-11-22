@@ -468,6 +468,8 @@ pub trait PathNavigationTrait: Send + Sync {
     fn get_target_pos(&self) -> Option<BlockPos>;
     fn can_path_to_targets_below_surface(&self) -> bool;
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool);
+    fn set_on_pathfinding_start(&mut self, _hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {}
+    fn set_on_pathfinding_done(&mut self, _hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {}
 
     fn is_stable_destination(&self, world: &World, pos: &BlockPos) -> bool {
         world.get_block_state(&pos.down()).is_solid_render()
@@ -509,6 +511,11 @@ pub struct PathNavigation {
     update_pathfinder_max_visited_nodes: bool,
     xz_step_distance: bool,
     pub is_idle: AtomicBool,
+    /// Callbacks invoked during path preparation and completion. Vanilla calls `onPathfindingStart`
+    /// and `onPathfindingDone` directly on `Mob` from node evaluator `prepare`/`done`, but Pumpkin's
+    /// evaluators lack a mob back-reference so hooks are stored on navigation instead.
+    pub on_pathfinding_start: Option<fn(&LivingEntity, &mut Self)>,
+    pub on_pathfinding_done: Option<fn(&LivingEntity, &mut Self)>,
 }
 
 impl Default for PathNavigation {
@@ -562,6 +569,8 @@ impl PathNavigation {
             update_pathfinder_max_visited_nodes: false,
             xz_step_distance: false,
             is_idle: AtomicBool::new(true),
+            on_pathfinding_start: None,
+            on_pathfinding_done: None,
         }
     }
 
@@ -665,6 +674,10 @@ impl PathNavigation {
     }
 
     fn prepare_evaluator(&mut self, entity: &LivingEntity) -> (uuid::Uuid, u64) {
+        if let Some(on_start) = self.on_pathfinding_start {
+            on_start(entity, self);
+        }
+
         let world = entity.entity.world.load_full();
         let world_change = (
             world.uuid,
@@ -702,6 +715,9 @@ impl PathNavigation {
         );
         let path_type = self.evaluator.get_path_type(&mut context, position);
         self.evaluator.done();
+        if let Some(on_done) = self.on_pathfinding_done {
+            on_done(entity, self);
+        }
         path_type
     }
 
@@ -748,6 +764,9 @@ impl PathNavigation {
             self.max_visited_nodes_multiplier,
         );
         self.evaluator.done();
+        if let Some(on_done) = self.on_pathfinding_done {
+            on_done(entity, self);
+        }
         if let Some(path) = &mut path {
             path.world_change = Some(world_change);
         }
@@ -1467,6 +1486,14 @@ impl PathNavigationTrait for GroundPathNavigation {
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool) {
         self.inner.can_path_to_targets_below_surface = can_path;
     }
+
+    fn set_on_pathfinding_start(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_start = hook;
+    }
+
+    fn set_on_pathfinding_done(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_done = hook;
+    }
 }
 
 pub struct FlyingPathNavigation {
@@ -1752,6 +1779,14 @@ impl PathNavigationTrait for FlyingPathNavigation {
 
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool) {
         self.inner.can_path_to_targets_below_surface = can_path;
+    }
+
+    fn set_on_pathfinding_start(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_start = hook;
+    }
+
+    fn set_on_pathfinding_done(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_done = hook;
     }
 }
 
@@ -2057,6 +2092,14 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool) {
         self.inner.can_path_to_targets_below_surface = can_path;
     }
+
+    fn set_on_pathfinding_start(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_start = hook;
+    }
+
+    fn set_on_pathfinding_done(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_done = hook;
+    }
 }
 
 pub struct WallClimberNavigation {
@@ -2318,6 +2361,14 @@ impl PathNavigationTrait for WallClimberNavigation {
 
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool) {
         self.inner.set_can_path_to_targets_below_surface(can_path);
+    }
+
+    fn set_on_pathfinding_start(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.set_on_pathfinding_start(hook);
+    }
+
+    fn set_on_pathfinding_done(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.set_on_pathfinding_done(hook);
     }
 }
 
@@ -2641,6 +2692,14 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
 
     fn set_can_path_to_targets_below_surface(&mut self, can_path: bool) {
         self.inner.can_path_to_targets_below_surface = can_path;
+    }
+
+    fn set_on_pathfinding_start(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_start = hook;
+    }
+
+    fn set_on_pathfinding_done(&mut self, hook: Option<fn(&LivingEntity, &mut PathNavigation)>) {
+        self.inner.on_pathfinding_done = hook;
     }
 }
 
