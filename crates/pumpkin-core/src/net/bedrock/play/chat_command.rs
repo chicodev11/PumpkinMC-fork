@@ -24,7 +24,7 @@ impl BedrockClient {
 
         send_cancellable! {{
             server;
-            PlayerCommandSendEvent {
+            PlayerCommandPreprocessEvent {
                 player: player.clone(),
                 command: command.clone(),
                 cancelled: false
