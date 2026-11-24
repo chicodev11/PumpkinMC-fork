@@ -280,8 +280,8 @@ impl BedBlock {
             (position.offset(bed_props.facing.to_offset()), *position)
         };
 
-        // Explode if bed rule explodes (EnvironmentAttributes.BED_RULE)
-        if world.dimension.bed_rule.explodes {
+        // Explode if bed rule explodes (EnvironmentAttributes.BED_RULE, BedRule.destroyOnUse)
+        if world.dimension.bed_rule.destroy_on_use {
             if Self::bed_fail(player, bed_head_pos, "NOT_POSSIBLE_HERE", true) != Some(true) {
                 return BlockActionResult::SuccessServer;
             }

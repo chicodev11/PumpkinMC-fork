@@ -1,6 +1,5 @@
 use crate::block::{BlockBehaviour, CanPlaceAtArgs};
 use crate::block::{GetStateForNeighborUpdateArgs, blocks::plant::PlantBlockBase};
-use crate::world::World;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockDirection, BlockStateId, tag};
 use pumpkin_macros::pumpkin_block;
@@ -37,6 +36,7 @@ impl PlantBlockBase for SporeBlossomBlock {
     fn can_place_at(&self, block_accessor: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
         let here_state = block_accessor.get_block_state(block_pos);
         block_accessor.is_face_sturdy_center(&block_pos.up(), BlockDirection::Down)
-            && !World::get_fluid_from_state_id(here_state.id).has_tag(&tag::Fluid::MINECRAFT_WATER)
+            && !pumpkin_data::fluid::Fluid::of_block_state(here_state.id)
+                .has_tag(&tag::Fluid::MINECRAFT_WATER)
     }
 }

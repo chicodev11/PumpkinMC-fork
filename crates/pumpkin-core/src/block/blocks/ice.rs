@@ -20,7 +20,7 @@ pub fn melt(world: &Arc<World>, position: &BlockPos) {
     if !world.block_fade_allowed(position) {
         return;
     }
-    if world.dimension.water_evaporates {
+    if world.water_evaporates(position) {
         world.set_block_state(position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
     } else {
         world.set_block_state(
@@ -78,7 +78,7 @@ impl BlockBehaviour for IceBlock {
         let held_item = args.player.inventory().held_item();
         let has_silk_touch = held_item.get_enchantment_level(&Enchantment::SILK_TOUCH) > 0;
         if !has_silk_touch {
-            if args.world.dimension.water_evaporates {
+            if args.world.water_evaporates(args.position) {
                 args.world.set_block_state(
                     args.position,
                     BlockStateId::AIR,
