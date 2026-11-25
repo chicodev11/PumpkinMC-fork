@@ -556,8 +556,7 @@ impl Mob for PiglinEntity {
             });
             return true;
         }
-        self.mob_entity
-            .mob_interact(player, item_stack, self.can_be_leashed())
+        false
     }
 
     fn make_brain(

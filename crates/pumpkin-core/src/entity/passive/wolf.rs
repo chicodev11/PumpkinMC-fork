@@ -214,6 +214,10 @@ impl Mob for WolfEntity {
         Some(set.ambient_sound(baby))
     }
 
+    fn can_be_leashed(&self) -> bool {
+        !self.is_angry()
+    }
+
     fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
         self.order_to_sit(false);
     }

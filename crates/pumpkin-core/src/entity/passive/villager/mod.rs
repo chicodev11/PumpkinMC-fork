@@ -1504,6 +1504,10 @@ impl Mob for VillagerEntity {
         false
     }
 
+    fn can_be_leashed(&self) -> bool {
+        false
+    }
+
     fn finalize_spawn_in_biome(&self, biome: &'static pumpkin_data::chunk::Biome) {
         self.finalize_villager_type_in_biome(biome);
     }

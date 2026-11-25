@@ -135,9 +135,7 @@ impl Mob for BoggedSkeletonEntity {
         if item_stack.get_item() == &Item::SHEARS && self.ready_for_shearing() {
             return shear_by_player(self, player, item_stack);
         }
-        self.entity
-            .mob_entity
-            .mob_interact(player, item_stack, self.can_be_leashed())
+        false
     }
 
     fn populate_default_equipment_slots(

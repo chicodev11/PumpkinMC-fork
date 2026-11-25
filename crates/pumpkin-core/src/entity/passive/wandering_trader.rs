@@ -626,6 +626,10 @@ impl Mob for WanderingTraderEntity {
         false
     }
 
+    fn can_be_leashed(&self) -> bool {
+        false
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
