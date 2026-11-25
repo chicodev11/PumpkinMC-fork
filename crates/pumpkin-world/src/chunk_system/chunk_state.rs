@@ -290,6 +290,7 @@ impl Chunk {
                 inhabited_time: AtomicU64::new(0),
                 custom_data: Mutex::new(NbtCompound::new()),
                 structures: Mutex::new(NbtCompound::new()),
+                preserved_tags: Mutex::new(NbtCompound::new()),
             })),
         ) {
             Self::Proto(proto) => proto,
@@ -339,6 +340,7 @@ impl Chunk {
             inhabited_time: AtomicU64::new(0),
             custom_data: Mutex::new(NbtCompound::new()),
             structures: Mutex::new(structures),
+            preserved_tags: Mutex::new(NbtCompound::new()),
         };
 
         *self = Self::Level(Arc::new(chunk));

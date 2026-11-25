@@ -85,6 +85,11 @@ pub struct ChunkData {
     /// Vanilla's `structures` tag (`starts` and `References`), kept as read or as built
     /// from generation and written back unchanged.
     pub structures: std::sync::Mutex<NbtCompound>,
+    /// Root tags this server does not model, kept verbatim so a save does not
+    /// strip them. A vanilla chunk carries `structures`, `PostProcessing`,
+    /// `carving_mask` and others; writing the chunk back without them loses
+    /// map data that nothing here can regenerate.
+    pub preserved_tags: std::sync::Mutex<NbtCompound>,
 }
 
 pub struct ChunkEntityData {
@@ -649,6 +654,7 @@ impl ChunkData {
             inhabited_time: std::sync::atomic::AtomicU64::new(0),
             custom_data: std::sync::Mutex::new(NbtCompound::new()),
             structures: std::sync::Mutex::new(NbtCompound::new()),
+            preserved_tags: std::sync::Mutex::new(NbtCompound::new()),
         }
     }
 
