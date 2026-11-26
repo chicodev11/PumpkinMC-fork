@@ -1,0 +1,680 @@
+use crate::math::vector3::Axis;
+
+use super::{position::BlockPos, vector3::Vector3};
+
+/// Represents an axis-aligned bounding box in 3D space.
+#[derive(Clone, Copy, Debug)]
+pub struct BoundingBox {
+    /// The minimum corner of the box.
+    pub min: Vector3<f64>,
+    /// The maximum corner of the box.
+    pub max: Vector3<f64>,
+}
+
+impl BoundingBox {
+    /// Creates a default bounding box at the origin using entity dimensions.
+    ///
+    /// # Arguments
+    /// * `size` – Dimensions of the entity.
+    #[must_use]
+    pub fn new_default(size: &EntityDimensions) -> Self {
+        Self::new_from_pos(0., 0., 0., size)
+    }
+
+    /// Creates a bounding box from a position and entity dimension.
+    ///
+    /// # Arguments
+    /// * `x` – X coordinate of the position.
+    /// * `y` – Y coordinate of the position.
+    /// * `z` – Z coordinate of the position.
+    /// * `size` – Dimensions of the entity.
+    #[must_use]
+    pub fn new_from_pos(x: f64, y: f64, z: f64, size: &EntityDimensions) -> Self {
+        let f = f64::from(size.width) / 2.;
+        Self {
+            min: Vector3::new(x - f, y, z - f),
+            max: Vector3::new(x + f, y + f64::from(size.height), z + f),
+        }
+    }
+
+    /// Expands this box by given amounts along each axis.
+    ///
+    /// # Arguments
+    /// * `x` – Amount to expand along the X axis.
+    /// * `y` – Amount to expand along the Y axis.
+    /// * `z` – Amount to expand along the Z axis.
+    #[must_use]
+    pub fn expand(&self, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            min: Vector3::new(self.min.x - x, self.min.y - y, self.min.z - z),
+            max: Vector3::new(self.max.x + x, self.max.y + y, self.max.z + z),
+        }
+    }
+
+    /// Vanilla `AABB.setMinY`.
+    #[must_use]
+    pub const fn with_min_y(mut self, min_y: f64) -> Self {
+        self.min.y = min_y;
+        self
+    }
+
+    /// Expands this bounding box towards a specific direction.
+    ///
+    /// If a provided value is negative, it extends the minimum boundary along that axis.
+    /// If a provided value is positive, it extends the maximum boundary along that axis.
+    ///
+    /// # Arguments
+    /// * `x` – Amount to expand towards on the X axis.
+    /// * `y` – Amount to expand towards on the Y axis.
+    /// * `z` – Amount to expand towards on the Z axis.
+    #[must_use]
+    pub fn expand_towards(&self, x: f64, y: f64, z: f64) -> Self {
+        let mut min_x = self.min.x;
+        let mut min_y = self.min.y;
+        let mut min_z = self.min.z;
+
+        let mut max_x = self.max.x;
+        let mut max_y = self.max.y;
+        let mut max_z = self.max.z;
+
+        if x < 0.0 {
+            min_x += x;
+        } else if x > 0.0 {
+            max_x += x;
+        }
+
+        if y < 0.0 {
+            min_y += y;
+        } else if y > 0.0 {
+            max_y += y;
+        }
+
+        if z < 0.0 {
+            min_z += z;
+        } else if z > 0.0 {
+            max_z += z;
+        }
+
+        Self {
+            min: Vector3::new(min_x, min_y, min_z),
+            max: Vector3::new(max_x, max_y, max_z),
+        }
+    }
+
+    /// Returns the smallest box enclosing both boxes
+    #[must_use]
+    pub const fn minmax(&self, other: &Self) -> Self {
+        Self {
+            min: Vector3::new(
+                self.min.x.min(other.min.x),
+                self.min.y.min(other.min.y),
+                self.min.z.min(other.min.z),
+            ),
+            max: Vector3::new(
+                self.max.x.max(other.max.x),
+                self.max.y.max(other.max.y),
+                self.max.z.max(other.max.z),
+            ),
+        }
+    }
+
+    /// Expands this box uniformly along all axes.
+    ///
+    /// # Arguments
+    /// * `value` – Amount to expand along all axes.
+    #[must_use]
+    pub fn expand_all(&self, value: f64) -> Self {
+        self.expand(value, value, value)
+    }
+
+    /// Contracts this box uniformly along all axes.
+    ///
+    /// # Arguments
+    /// * `value` – Amount to contract along all axes.
+    #[must_use]
+    pub fn contract_all(&self, value: f64) -> Self {
+        self.expand_all(-value)
+    }
+
+    /// Returns a new bounding box shifted to a specific block position.
+    ///
+    /// # Arguments
+    /// * `pos` – Block position to move the box to.
+    #[must_use]
+    pub fn at_pos(&self, pos: BlockPos) -> Self {
+        let vec3 = Vector3 {
+            x: f64::from(pos.0.x),
+            y: f64::from(pos.0.y),
+            z: f64::from(pos.0.z),
+        };
+        Self {
+            min: self.min + vec3,
+            max: self.max + vec3,
+        }
+    }
+
+    /// Returns a new bounding box offset by another bounding box.
+    ///
+    /// # Arguments
+    /// * `other` – The bounding box to add as an offset.
+    #[must_use]
+    pub fn offset(&self, other: Self) -> Self {
+        Self {
+            min: self.min.add(&other.min),
+            max: self.max.add(&other.max),
+        }
+    }
+
+    #[must_use]
+    pub fn of_size(center: Vector3<f64>, x: f64, y: f64, z: f64) -> Self {
+        Self::new(center, center).expand(x / 2.0, y / 2.0, z / 2.0)
+    }
+
+    #[must_use]
+    pub const fn closest_point_to(&self, point: Vector3<f64>) -> Vector3<f64> {
+        Vector3::new(
+            point.x.clamp(self.min.x, self.max.x),
+            point.y.clamp(self.min.y, self.max.y),
+            point.z.clamp(self.min.z, self.max.z),
+        )
+    }
+
+    #[must_use]
+    pub fn subtract(&self, other: &Self) -> Vec<Self> {
+        if !self.intersects(other) {
+            return vec![*self];
+        }
+        let mut pieces = Vec::with_capacity(6);
+        let mut rest = *self;
+        if other.min.x > rest.min.x {
+            pieces.push(Self::new(
+                rest.min,
+                Vector3::new(other.min.x, rest.max.y, rest.max.z),
+            ));
+            rest.min.x = other.min.x;
+        }
+        if other.max.x < rest.max.x {
+            pieces.push(Self::new(
+                Vector3::new(other.max.x, rest.min.y, rest.min.z),
+                rest.max,
+            ));
+            rest.max.x = other.max.x;
+        }
+        if other.min.y > rest.min.y {
+            pieces.push(Self::new(
+                rest.min,
+                Vector3::new(rest.max.x, other.min.y, rest.max.z),
+            ));
+            rest.min.y = other.min.y;
+        }
+        if other.max.y < rest.max.y {
+            pieces.push(Self::new(
+                Vector3::new(rest.min.x, other.max.y, rest.min.z),
+                rest.max,
+            ));
+            rest.max.y = other.max.y;
+        }
+        if other.min.z > rest.min.z {
+            pieces.push(Self::new(
+                rest.min,
+                Vector3::new(rest.max.x, rest.max.y, other.min.z),
+            ));
+            rest.min.z = other.min.z;
+        }
+        if other.max.z < rest.max.z {
+            pieces.push(Self::new(
+                Vector3::new(rest.min.x, rest.min.y, other.max.z),
+                rest.max,
+            ));
+        }
+        pieces
+    }
+
+    /// Creates a bounding box from explicit min and max coordinates.
+    ///
+    /// # Arguments
+    /// * `min` – Minimum corner of the box.
+    /// * `max` – Maximum corner of the box.
+    #[must_use]
+    pub const fn new(min: Vector3<f64>, max: Vector3<f64>) -> Self {
+        Self { min, max }
+    }
+
+    /// Creates a bounding box from arrays of min and max coordinates.
+    ///
+    /// # Arguments
+    /// * `min` – Minimum corner as an array [x, y, z].
+    /// * `max` – Maximum corner as an array [x, y, z].
+    #[must_use]
+    pub const fn new_array(min: [f64; 3], max: [f64; 3]) -> Self {
+        Self {
+            min: Vector3::new(min[0], min[1], min[2]),
+            max: Vector3::new(max[0], max[1], max[2]),
+        }
+    }
+
+    /// Returns a bounding box representing a full block from (0,0,0) to (1,1,1).
+    #[must_use]
+    pub const fn full_block() -> Self {
+        Self {
+            min: Vector3::new(0f64, 0f64, 0f64),
+            max: Vector3::new(1f64, 1f64, 1f64),
+        }
+    }
+
+    /// Creates a bounding box from a block position covering a full block.
+    ///
+    /// # Arguments
+    /// * `position` – Block position to base the bounding box on.
+    #[must_use]
+    pub fn from_block(position: &BlockPos) -> Self {
+        let position = position.0;
+        Self {
+            min: Vector3::new(
+                f64::from(position.x),
+                f64::from(position.y),
+                f64::from(position.z),
+            ),
+            max: Vector3::new(
+                f64::from(position.x) + 1.0,
+                f64::from(position.y) + 1.0,
+                f64::from(position.z) + 1.0,
+            ),
+        }
+    }
+
+    /// Returns the min or max side of the bounding box.
+    ///
+    /// # Arguments
+    /// * `max` – Whether to return the max side (true) or min side (false).
+    #[must_use]
+    pub const fn get_side(&self, max: bool) -> Vector3<f64> {
+        if max { self.max } else { self.min }
+    }
+
+    /// Vanilla `Shapes.collide`: how far this box moves along `axis` before touching `boxes`. under `1e-7` overlap still blocks.
+    ///
+    /// # Returns
+    /// The allowed distance and the index of the box that limited it, if any.
+    #[must_use]
+    pub fn collide_along(
+        &self,
+        axis: Axis,
+        boxes: &[Self],
+        mut distance: f64,
+    ) -> (f64, Option<usize>) {
+        const EPSILON: f64 = 1.0e-7;
+        let [a, b] = Axis::excluding(axis);
+        let mut blocker = None;
+
+        for (i, other) in boxes.iter().enumerate() {
+            if distance.abs() < EPSILON {
+                return (0.0, blocker);
+            }
+            // Only boxes overlapping on the two other axes can block.
+            if other.min.get_axis(a) >= self.max.get_axis(a) - EPSILON
+                || other.max.get_axis(a) <= self.min.get_axis(a) + EPSILON
+                || other.min.get_axis(b) >= self.max.get_axis(b) - EPSILON
+                || other.max.get_axis(b) <= self.min.get_axis(b) + EPSILON
+            {
+                continue;
+            }
+
+            if distance > 0.0 {
+                let gap = other.min.get_axis(axis) - self.max.get_axis(axis);
+                if gap >= -EPSILON && gap < distance {
+                    distance = gap;
+                    blocker = Some(i);
+                }
+            } else {
+                let gap = other.max.get_axis(axis) - self.min.get_axis(axis);
+                if gap <= EPSILON && gap > distance {
+                    distance = gap;
+                    blocker = Some(i);
+                }
+            }
+        }
+
+        (distance, blocker)
+    }
+
+    /// Returns the average side length of the bounding box.
+    #[must_use]
+    pub fn get_average_side_length(&self) -> f64 {
+        let width = self.max.x - self.min.x;
+        let height = self.max.y - self.min.y;
+        let depth = self.max.z - self.min.z;
+
+        (width + height + depth) / 3.0
+    }
+
+    /// Returns the minimum block position covered by this bounding box.
+    #[must_use]
+    pub const fn min_block_pos(&self) -> BlockPos {
+        BlockPos::floored_v(self.min)
+    }
+
+    /// Returns the maximum block position covered by this bounding box.
+    #[must_use]
+    pub const fn max_block_pos(&self) -> BlockPos {
+        // Use a tiny epsilon and floor the max coordinates so that a box whose
+        // max is exactly on a block boundary does not include the adjacent
+        // block. This mirrors vanilla behaviour where max block is inclusive
+        // only when the entity actually overlaps that block.
+        let eps = 1e-9f64;
+        BlockPos::floored_v(Vector3::new(
+            self.max.x - eps,
+            self.max.y - eps,
+            self.max.z - eps,
+        ))
+    }
+
+    /// Returns a new bounding box shifted by a delta vector.
+    ///
+    /// # Arguments
+    /// * `delta` – Vector to shift the bounding box by.
+    #[must_use]
+    pub fn shift(&self, delta: Vector3<f64>) -> Self {
+        Self {
+            min: self.min + delta,
+            max: self.max + delta,
+        }
+    }
+
+    /// Stretches this bounding box along each axis by a given vector.
+    ///
+    /// # Arguments
+    /// * `other` – Vector specifying how much to stretch along each axis.
+    #[must_use]
+    pub const fn stretch(&self, other: Vector3<f64>) -> Self {
+        let mut new = *self;
+
+        if other.x < 0.0 {
+            new.min.x += other.x;
+        } else if other.x > 0.0 {
+            new.max.x += other.x;
+        }
+
+        if other.y < 0.0 {
+            new.min.y += other.y;
+        } else if other.y > 0.0 {
+            new.max.y += other.y;
+        }
+
+        if other.z < 0.0 {
+            new.min.z += other.z;
+        } else if other.z > 0.0 {
+            new.max.z += other.z;
+        }
+
+        new
+    }
+
+    /// Creates a bounding box from a block position with zero volume.
+    ///
+    /// # Arguments
+    /// * `position` – Block position to base the bounding box on.
+    #[must_use]
+    pub fn from_block_raw(position: &BlockPos) -> Self {
+        let position = position.0;
+        Self {
+            min: Vector3::new(
+                f64::from(position.x),
+                f64::from(position.y),
+                f64::from(position.z),
+            ),
+            max: Vector3::new(
+                f64::from(position.x),
+                f64::from(position.y),
+                f64::from(position.z),
+            ),
+        }
+    }
+
+    /// Checks if this bounding box intersects another bounding box.
+    ///
+    /// # Arguments
+    /// * `other` – The other bounding box to check against.
+    #[must_use]
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+            && self.min.z < other.max.z
+            && self.max.z > other.min.z
+    }
+
+    /// Computes the squared magnitude from a point to the nearest point on this bounding box.
+    ///
+    /// # Arguments
+    /// * `pos` – The point to measure from.
+    #[must_use]
+    pub fn squared_magnitude(&self, pos: Vector3<f64>) -> f64 {
+        let d = f64::max(f64::max(self.min.x - pos.x, pos.x - self.max.x), 0.0);
+        let e = f64::max(f64::max(self.min.y - pos.y, pos.y - self.max.y), 0.0);
+        let f = f64::max(f64::max(self.min.z - pos.z, pos.z - self.max.z), 0.0);
+
+        super::squared_magnitude(d, e, f)
+    }
+
+    /// Checks for a ray intersection between a line segment `(start, start + dir)` and this box.
+    /// Returns the normalized intersection time `t` in `[0.0, 1.0]` if any intersection occurs.
+    #[must_use]
+    pub fn ray_intersection(&self, start: Vector3<f64>, dir: Vector3<f64>) -> Option<f64> {
+        let mut t_min = 0.0f64;
+        let mut t_max = 1.0f64;
+
+        let b_min = [self.min.x, self.min.y, self.min.z];
+        let b_max = [self.max.x, self.max.y, self.max.z];
+        let s = [start.x, start.y, start.z];
+        let d = [dir.x, dir.y, dir.z];
+
+        for i in 0..3 {
+            if d[i].abs() < 1e-9 {
+                if s[i] < b_min[i] || s[i] > b_max[i] {
+                    return None;
+                }
+            } else {
+                let t1 = (b_min[i] - s[i]) / d[i];
+                let t2 = (b_max[i] - s[i]) / d[i];
+                t_min = t_min.max(t1.min(t2));
+                t_max = t_max.min(t1.max(t2));
+            }
+        }
+
+        (t_min <= t_max && (0.0..=1.0).contains(&t_min)).then_some(t_min)
+    }
+
+    /// Whether `point` is inside, counting the min faces but not the max faces.
+    #[must_use]
+    pub fn contains(&self, point: Vector3<f64>) -> bool {
+        point.x >= self.min.x
+            && point.x < self.max.x
+            && point.y >= self.min.y
+            && point.y < self.max.y
+            && point.z >= self.min.z
+            && point.z < self.max.z
+    }
+
+    #[must_use]
+    pub fn get_center(&self) -> Vector3<f64> {
+        (self.min + self.max) * 0.5
+    }
+
+    /// Where the segment first enters this box. A segment starting inside never hits.
+    #[must_use]
+    pub fn clip(&self, from: Vector3<f64>, to: Vector3<f64>) -> Option<Vector3<f64>> {
+        let min = [self.min.x, self.min.y, self.min.z];
+        let max = [self.max.x, self.max.y, self.max.z];
+        let origin = [from.x, from.y, from.z];
+        let delta = [to.x - from.x, to.y - from.y, to.z - from.z];
+        let mut scale = 1.0;
+        let mut hit = false;
+        for axis in 0..3 {
+            if delta[axis] > 1.0e-7 {
+                hit |= Self::clip_point(&mut scale, axis, min[axis], &origin, &delta, &min, &max);
+            } else if delta[axis] < -1.0e-7 {
+                hit |= Self::clip_point(&mut scale, axis, max[axis], &origin, &delta, &min, &max);
+            }
+        }
+        hit.then(|| from.add(&(to.sub(&from) * scale)))
+    }
+
+    fn clip_point(
+        scale: &mut f64,
+        axis: usize,
+        plane: f64,
+        origin: &[f64; 3],
+        delta: &[f64; 3],
+        min: &[f64; 3],
+        max: &[f64; 3],
+    ) -> bool {
+        let s = (plane - origin[axis]) / delta[axis];
+        if s <= 0.0 || s >= *scale {
+            return false;
+        }
+        let b = (axis + 1) % 3;
+        let c = (axis + 2) % 3;
+        let pb = origin[b] + s * delta[b];
+        let pc = origin[c] + s * delta[c];
+        if min[b] - 1.0e-7 < pb
+            && pb < max[b] + 1.0e-7
+            && min[c] - 1.0e-7 < pc
+            && pc < max[c] + 1.0e-7
+        {
+            *scale = s;
+            return true;
+        }
+        false
+    }
+}
+
+/// Represents the dimensions of an entity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntityDimensions {
+    /// Width of the entity.
+    pub width: f32,
+    /// Height of the entity.
+    pub height: f32,
+    /// Eye height relative to the bottom of the entity.
+    pub eye_height: f32,
+}
+
+impl EntityDimensions {
+    /// Creates a new entity dimensions object.
+    ///
+    /// # Arguments
+    /// * `width` – Width of the entity.
+    /// * `height` – Height of the entity.
+    /// * `eye_height` – Eye height of the entity.
+    #[must_use]
+    pub const fn new(width: f32, height: f32, eye_height: f32) -> Self {
+        Self {
+            width,
+            height,
+            eye_height,
+        }
+    }
+
+    /// Vanilla `EntityDimensions.scale` for a non-fixed size.
+    #[must_use]
+    pub const fn scale(self, scale: f32) -> Self {
+        Self {
+            width: self.width * scale,
+            height: self.height * scale,
+            eye_height: self.eye_height * scale,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bb(min: (f64, f64, f64), max: (f64, f64, f64)) -> BoundingBox {
+        BoundingBox::new(
+            Vector3::new(min.0, min.1, min.2),
+            Vector3::new(max.0, max.1, max.2),
+        )
+    }
+
+    #[test]
+    fn collide_along_stops_at_floor_and_wall() {
+        let floor = bb((0.0, 63.0, 0.0), (1.0, 64.0, 1.0));
+        let item = bb((0.375, 64.2, 0.375), (0.625, 64.45, 0.625));
+        let (dy, blocker) = item.collide_along(Axis::Y, &[floor], -0.5);
+        assert!((dy + 0.2).abs() < 1e-9);
+        assert_eq!(blocker, Some(0));
+
+        let wall = bb((1.0, 64.0, 0.0), (2.0, 65.0, 1.0));
+        let resting = bb((0.7, 64.0, 0.4), (0.95, 64.25, 0.65));
+        let (dx, _) = resting.collide_along(Axis::X, &[wall], 0.3);
+        assert!((dx - 0.05).abs() < 1e-9);
+        // Only boxes overlapping on the other axes block.
+        let (dz, blocker) = resting.collide_along(Axis::Z, &[wall], 0.3);
+        assert_eq!((dz, blocker), (0.3, None));
+        // Shorter than the 0.05 gap: the full move, nothing blocks.
+        assert_eq!(resting.collide_along(Axis::X, &[wall], 0.03), (0.03, None));
+    }
+
+    #[test]
+    fn collide_along_nearest_wall_wins_in_any_order() {
+        let resting = bb((0.7, 64.0, 0.4), (0.95, 64.25, 0.65));
+        let near = bb((1.0, 64.0, 0.0), (2.0, 65.0, 1.0));
+        let far = bb((1.2, 64.0, 0.0), (2.0, 65.0, 1.0));
+        let (dx, blocker) = resting.collide_along(Axis::X, &[near, far], 0.5);
+        assert!((dx - 0.05).abs() < 1e-9);
+        assert_eq!(blocker, Some(0));
+        let (dx, blocker) = resting.collide_along(Axis::X, &[far, near], 0.5);
+        assert!((dx - 0.05).abs() < 1e-9);
+        assert_eq!(blocker, Some(1));
+
+        // Moving toward -x: the wall ending at 0.6 is nearer than the one ending at 0.4.
+        let near = bb((-1.0, 64.0, 0.0), (0.6, 65.0, 1.0));
+        let far = bb((-1.0, 64.0, 0.0), (0.4, 65.0, 1.0));
+        let (dx, blocker) = resting.collide_along(Axis::X, &[near, far], -0.5);
+        assert!((dx + 0.1).abs() < 1e-9);
+        assert_eq!(blocker, Some(0));
+        let (dx, blocker) = resting.collide_along(Axis::X, &[far, near], -0.5);
+        assert!((dx + 0.1).abs() < 1e-9);
+        assert_eq!(blocker, Some(1));
+        // Too short to reach either wall: the full move, nothing blocks.
+        assert_eq!(
+            resting.collide_along(Axis::X, &[near, far], -0.05),
+            (-0.05, None)
+        );
+    }
+
+    #[test]
+    fn collide_along_blocks_within_epsilon_overlap() {
+        let floor = bb((0.0, 63.0, 0.0), (1.0, 64.0, 1.0));
+        // Rounding left the item 5e-8 inside the floor: vanilla still treats it as resting.
+        let sunk = bb((0.375, 64.0 - 5e-8, 0.375), (0.625, 64.25, 0.625));
+        let (dy, _) = sunk.collide_along(Axis::Y, &[floor], -0.04);
+        assert!(dy.abs() < 1e-7);
+        // Deeper overlap is ignored, like vanilla.
+        let inside = bb((0.375, 63.9, 0.375), (0.625, 64.15, 0.625));
+        assert_eq!(
+            inside.collide_along(Axis::Y, &[floor], -0.04),
+            (-0.04, None)
+        );
+    }
+
+    #[test]
+    fn ray_intersection_hits_and_misses() {
+        let bb = BoundingBox::new(Vector3::new(-1.0, -1.0, -1.0), Vector3::new(1.0, 1.0, 1.0));
+        let start = Vector3::new(-5.0, 0.0, 0.0);
+        let dir_hit = Vector3::new(10.0, 0.0, 0.0);
+        let hit = bb.ray_intersection(start, dir_hit);
+        assert!(hit.is_some());
+        let t = hit.unwrap();
+        assert!((t - 0.4).abs() < 1e-6);
+
+        let dir_miss = Vector3::new(0.0, 10.0, 0.0);
+        assert!(bb.ray_intersection(start, dir_miss).is_none());
+
+        let dir_short = Vector3::new(2.0, 0.0, 0.0);
+        assert!(bb.ray_intersection(start, dir_short).is_none());
+    }
+}

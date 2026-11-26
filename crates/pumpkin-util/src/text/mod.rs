@@ -1,0 +1,2962 @@
+use crate::identifier::Identifier;
+use crate::text::color::{ARGBColor, hsv_to_rgb};
+use crate::translation::{
+    Locale, get_translation, get_translation_text, reorder_substitutions, translation_to_pretty,
+};
+use crate::version::JavaMinecraftVersion;
+use click::ClickEvent;
+use color::Color;
+use colored::Colorize;
+use core::str;
+use hover::HoverEvent;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::borrow::Cow;
+use std::fmt::Write;
+use std::sync::LazyLock;
+use style::Style;
+
+pub mod click;
+pub mod color;
+pub mod hover;
+pub mod legacy;
+pub mod minimessage;
+mod nbt_de;
+mod short_form;
+pub mod style;
+
+/// Represents a Minecraft chat component.
+///
+/// Text components are the building blocks of Minecraft's chat system, allowing for
+/// rich formatted text with colors, styles, click events, hover tooltips, and
+/// translations. They can be nested and combined to create complex messages.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TextComponent(pub TextComponentBase);
+
+impl<'de> Deserialize<'de> for TextComponent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        short_form::Component::deserialize(deserializer).map(|c| Self(c.0))
+    }
+}
+
+impl Serialize for TextComponent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_newtype_struct("TextComponent", &self.0.clone().to_translated())
+    }
+}
+
+/// The base structure for a text component containing content, style, and children.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct TextComponentBase {
+    /// The actual content of this component (text, translation, etc.).
+    #[serde(flatten)]
+    pub content: Box<TextContent>,
+    /// The styling applied to this component (color, bold, click events, etc.).
+    #[serde(flatten)]
+    pub style: Box<Style>,
+    /// Child text components that are appended after this component's content.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "short_form::components"
+    )]
+    pub extra: Vec<Self>,
+}
+
+impl TextComponentBase {
+    /// Converts this component to an NBT compound tag for the latest Minecraft version.
+    #[must_use]
+    pub fn to_nbt_compound(&self) -> pumpkin_nbt::NbtCompound {
+        self.to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3)
+    }
+
+    /// Converts this component to an NBT compound tag for a specific Minecraft version.
+    #[expect(clippy::too_many_lines)]
+    #[must_use]
+    pub fn to_nbt_compound_for_version(
+        &self,
+        version: &JavaMinecraftVersion,
+    ) -> pumpkin_nbt::NbtCompound {
+        let mut compound = pumpkin_nbt::NbtCompound::new();
+        match &*self.content {
+            TextContent::Text { text } => {
+                compound.put_string("text", text.to_string());
+            }
+            TextContent::Translate {
+                translate, with, ..
+            } => {
+                compound.put_string("translate", translate.to_string());
+                if !with.is_empty() {
+                    let list = with
+                        .iter()
+                        .map(|w| w.to_nbt_tag_for_version(version))
+                        .collect();
+                    compound.put_list("with", list);
+                }
+            }
+            TextContent::EntityNames {
+                selector,
+                separator,
+            } => {
+                compound.put_string("selector", selector.to_string());
+                if let Some(sep) = separator {
+                    compound.put_string("separator", sep.to_string());
+                }
+            }
+            TextContent::Keybind { keybind } => {
+                compound.put_string("keybind", keybind.to_string());
+            }
+            TextContent::Score { score } => {
+                let mut inner = pumpkin_nbt::NbtCompound::new();
+                inner.put_string("name", score.name.to_string());
+                inner.put_string("objective", score.objective.to_string());
+                compound.put_compound("score", inner);
+            }
+            TextContent::AtlasSprite { atlas, sprite } => {
+                if *version >= JavaMinecraftVersion::V_26_1 {
+                    if let Some(atlas) = atlas {
+                        compound.put_string("atlas", atlas.to_string());
+                    }
+                    compound.put_string("sprite", sprite.to_string());
+                } else {
+                    compound.put_string("text", atlas_sprite_fallback(atlas.as_deref(), sprite));
+                }
+            }
+            TextContent::Custom { key, with, .. } => {
+                compound.put_string("translate", key.to_string());
+                if !with.is_empty() {
+                    let list = with
+                        .iter()
+                        .map(|w| w.to_nbt_tag_for_version(version))
+                        .collect();
+                    compound.put_list("with", list);
+                }
+            }
+            TextContent::PlayerSprite { profile, hat } => {
+                if *version >= JavaMinecraftVersion::V_26_1 {
+                    // Like vanilla: no `type`, the client finds the object by its
+                    // `player` key, and `hat` only when it is off.
+                    compound.put_compound("player", profile.0.clone());
+                    if !hat {
+                        compound.put_bool("hat", false);
+                    }
+                } else {
+                    let name = profile.0.get_string("name").unwrap_or("player_sprite");
+                    compound.put_string("text", name.to_string());
+                }
+            }
+        }
+
+        if let Some(ref color) = self.style.color {
+            let color_str = match color {
+                Color::Reset => Some("reset".to_string()),
+                Color::Named(c) => Some(c.name().to_string()),
+                Color::Rgb(rgb) => {
+                    if *version >= JavaMinecraftVersion::V_1_16 {
+                        Some(format!("#{:02X}{:02X}{:02X}", rgb.red, rgb.green, rgb.blue))
+                    } else {
+                        Some(rgb.to_nearest_named().name().to_string())
+                    }
+                }
+            };
+            if let Some(cs) = color_str {
+                compound.put_string("color", cs);
+            }
+        }
+
+        if let Some(bold) = self.style.bold {
+            compound.put_byte("bold", i8::from(bold));
+        }
+        if let Some(italic) = self.style.italic {
+            compound.put_byte("italic", i8::from(italic));
+        }
+        if let Some(underlined) = self.style.underlined {
+            compound.put_byte("underlined", i8::from(underlined));
+        }
+        if let Some(strikethrough) = self.style.strikethrough {
+            compound.put_byte("strikethrough", i8::from(strikethrough));
+        }
+        if let Some(obfuscated) = self.style.obfuscated {
+            compound.put_byte("obfuscated", i8::from(obfuscated));
+        }
+        if let Some(ref insertion) = self.style.insertion {
+            compound.put_string("insertion", insertion.clone());
+        }
+        if let Some(ref font) = self.style.font {
+            compound.put_string("font", font.clone());
+        }
+
+        if *version >= JavaMinecraftVersion::V_1_21_4
+            && let Some(ref shadow) = self.style.shadow_color
+        {
+            compound.put_int("shadow_color", shadow.to_argb_int());
+        }
+
+        if let Some(ref click) = self.style.click_event {
+            let mut click_tag = pumpkin_nbt::NbtCompound::new();
+            match click {
+                ClickEvent::OpenUrl { url } => {
+                    click_tag.put_string("action", "open_url".to_string());
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_tag.put_string("url", url.to_string());
+                    } else {
+                        click_tag.put_string("value", url.to_string());
+                    }
+                }
+                ClickEvent::OpenFile { path } => {
+                    click_tag.put_string("action", "open_file".to_string());
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_tag.put_string("path", path.to_string());
+                    } else {
+                        click_tag.put_string("value", path.to_string());
+                    }
+                }
+                ClickEvent::RunCommand { command } => {
+                    click_tag.put_string("action", "run_command".to_string());
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_tag.put_string("command", command.to_string());
+                    } else {
+                        click_tag.put_string("value", command.to_string());
+                    }
+                }
+                ClickEvent::ShowDialog { dialog } => {
+                    click_tag.put_string("action", "show_dialog".to_string());
+                    click_tag.put("dialog", dialog.to_nbt());
+                }
+                ClickEvent::Custom { id, payload } => {
+                    click_tag.put_string("action", "custom".to_string());
+                    click_tag.put_string("id", id.to_string());
+                    if let Some(payload) = payload {
+                        click_tag.put("payload", payload.to_nbt());
+                    }
+                }
+                ClickEvent::SuggestCommand { command } => {
+                    click_tag.put_string("action", "suggest_command".to_string());
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_tag.put_string("command", command.to_string());
+                    } else {
+                        click_tag.put_string("value", command.to_string());
+                    }
+                }
+                ClickEvent::ChangePage { page } => {
+                    click_tag.put_string("action", "change_page".to_string());
+                    if *version >= JavaMinecraftVersion::V_1_21_6 {
+                        click_tag.put_int("page", *page as i32);
+                    } else if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_tag.put_string("page", page.to_string());
+                    } else {
+                        click_tag.put_string("value", page.to_string());
+                    }
+                }
+                ClickEvent::CopyToClipboard { value } => {
+                    click_tag.put_string("action", "copy_to_clipboard".to_string());
+                    click_tag.put_string("value", value.to_string());
+                }
+            }
+            let click_key = if *version >= JavaMinecraftVersion::V_1_21_5 {
+                "click_event"
+            } else {
+                "clickEvent"
+            };
+            compound.put_compound(click_key, click_tag);
+        }
+
+        if let Some(ref hover) = self.style.hover_event {
+            let mut hover_tag = pumpkin_nbt::NbtCompound::new();
+            if *version >= JavaMinecraftVersion::V_1_21_5 {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_tag.put_string("action", "show_text".to_string());
+                        if value.len() == 1 {
+                            hover_tag.put("value", value[0].to_nbt_tag_for_version(version));
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_nbt_tag_for_version(version))
+                                .collect();
+                            hover_tag.put_list("value", list);
+                        }
+                    }
+                    HoverEvent::ShowItem {
+                        id,
+                        count,
+                        components,
+                    } => {
+                        hover_tag.put_string("action", "show_item".to_string());
+                        hover_tag.put_string("id", id.to_string());
+                        if let Some(cnt) = count {
+                            hover_tag.put_int("count", *cnt);
+                        }
+                        if let Some(components) = components {
+                            hover_tag.put("components", components.to_nbt());
+                        }
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_tag.put_string("action", "show_entity".to_string());
+                        hover_tag.put_string("id", id.to_string());
+                        hover_tag.put_string("uuid", uuid.to_string());
+                        if let Some(n) = name {
+                            if n.len() == 1 {
+                                hover_tag.put("name", n[0].to_nbt_tag_for_version(version));
+                            } else {
+                                let list = n
+                                    .iter()
+                                    .map(|e| e.to_nbt_tag_for_version(version))
+                                    .collect();
+                                hover_tag.put_list("name", list);
+                            }
+                        }
+                    }
+                }
+            } else if *version >= JavaMinecraftVersion::V_1_16 {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_tag.put_string("action", "show_text".to_string());
+                        if value.len() == 1 {
+                            hover_tag.put("contents", value[0].to_nbt_tag_for_version(version));
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_nbt_tag_for_version(version))
+                                .collect();
+                            hover_tag.put_list("contents", list);
+                        }
+                    }
+                    HoverEvent::ShowItem {
+                        id,
+                        count,
+                        components,
+                    } => {
+                        hover_tag.put_string("action", "show_item".to_string());
+                        let mut contents = pumpkin_nbt::NbtCompound::new();
+                        contents.put_string("id", id.to_string());
+                        if let Some(cnt) = count {
+                            contents.put_int("count", *cnt);
+                        }
+                        if let Some(components) = components {
+                            contents.put("components", components.to_nbt());
+                        }
+                        hover_tag.put_compound("contents", contents);
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_tag.put_string("action", "show_entity".to_string());
+                        let mut contents = pumpkin_nbt::NbtCompound::new();
+                        contents.put_string("type", id.to_string());
+                        contents.put_string("id", uuid.to_string());
+                        if let Some(n) = name {
+                            if n.len() == 1 {
+                                contents.put("name", n[0].to_nbt_tag_for_version(version));
+                            } else {
+                                let list = n
+                                    .iter()
+                                    .map(|e| e.to_nbt_tag_for_version(version))
+                                    .collect();
+                                contents.put_list("name", list);
+                            }
+                        }
+                        hover_tag.put_compound("contents", contents);
+                    }
+                }
+            } else {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_tag.put_string("action", "show_text".to_string());
+                        if value.len() == 1 {
+                            hover_tag.put("value", value[0].to_nbt_tag_for_version(version));
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_nbt_tag_for_version(version))
+                                .collect();
+                            hover_tag.put_list("value", list);
+                        }
+                    }
+                    HoverEvent::ShowItem { id, count, .. } => {
+                        hover_tag.put_string("action", "show_item".to_string());
+                        let count_val = count.unwrap_or(1);
+                        hover_tag
+                            .put_string("value", format!("{{id:\"{id}\",Count:{count_val}b}}"));
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_tag.put_string("action", "show_entity".to_string());
+                        let name_str = name.as_ref().map_or_else(String::new, |n| {
+                            n.iter()
+                                .map(|e| e.clone().get_text(Locale::EnUs))
+                                .collect::<String>()
+                        });
+                        hover_tag.put_string(
+                            "value",
+                            format!("{{id:\"{uuid}\",type:\"{id}\",name:\"{name_str}\"}}"),
+                        );
+                    }
+                }
+            }
+            let hover_key = if *version >= JavaMinecraftVersion::V_1_21_5 {
+                "hover_event"
+            } else {
+                "hoverEvent"
+            };
+            compound.put_compound(hover_key, hover_tag);
+        }
+
+        if !self.extra.is_empty() {
+            let list = self
+                .extra
+                .iter()
+                .map(|e| e.to_nbt_tag_for_version(version))
+                .collect();
+            compound.put_list("extra", list);
+        }
+
+        compound
+    }
+
+    /// Converts this component to an `NbtTag` for the specified Minecraft version.
+    ///
+    /// For versions >= 1.20.3, a compact representation is used when possible (plain string tag).
+    #[must_use]
+    pub fn to_nbt_tag_for_version(
+        &self,
+        version: &JavaMinecraftVersion,
+    ) -> pumpkin_nbt::tag::NbtTag {
+        if *version >= JavaMinecraftVersion::V_1_20_3
+            && self.style.is_empty()
+            && self.extra.is_empty()
+            && let TextContent::Text { text } = &*self.content
+        {
+            pumpkin_nbt::tag::NbtTag::String(text.to_string().into_boxed_str())
+        } else {
+            pumpkin_nbt::tag::NbtTag::Compound(self.to_nbt_compound_for_version(version))
+        }
+    }
+
+    /// Converts this component to a `serde_json::Value` for a specific Minecraft version.
+    #[expect(clippy::too_many_lines)]
+    #[must_use]
+    pub fn to_json_value_for_version(&self, version: &JavaMinecraftVersion) -> serde_json::Value {
+        if *version >= JavaMinecraftVersion::V_1_20_3
+            && self.style.is_empty()
+            && self.extra.is_empty()
+            && let TextContent::Text { text } = &*self.content
+        {
+            return serde_json::Value::String(text.to_string());
+        }
+
+        let mut map = serde_json::Map::new();
+
+        match &*self.content {
+            TextContent::Text { text } => {
+                map.insert(
+                    "text".to_string(),
+                    serde_json::Value::String(text.to_string()),
+                );
+            }
+            TextContent::Translate {
+                translate, with, ..
+            } => {
+                map.insert(
+                    "translate".to_string(),
+                    serde_json::Value::String(translate.to_string()),
+                );
+                if !with.is_empty() {
+                    let list: Vec<serde_json::Value> = with
+                        .iter()
+                        .map(|w| w.to_json_value_for_version(version))
+                        .collect();
+                    map.insert("with".to_string(), serde_json::Value::Array(list));
+                }
+            }
+            TextContent::EntityNames {
+                selector,
+                separator,
+            } => {
+                map.insert(
+                    "selector".to_string(),
+                    serde_json::Value::String(selector.to_string()),
+                );
+                if let Some(sep) = separator {
+                    map.insert(
+                        "separator".to_string(),
+                        serde_json::Value::String(sep.to_string()),
+                    );
+                }
+            }
+            TextContent::Keybind { keybind } => {
+                map.insert(
+                    "keybind".to_string(),
+                    serde_json::Value::String(keybind.to_string()),
+                );
+            }
+            TextContent::Score { score } => {
+                map.insert(
+                    "score".to_string(),
+                    serde_json::json!({
+                        "name": score.name.as_ref(),
+                        "objective": score.objective.as_ref(),
+                    }),
+                );
+            }
+            TextContent::AtlasSprite { atlas, sprite } => {
+                if *version >= JavaMinecraftVersion::V_26_1 {
+                    if let Some(atlas) = atlas {
+                        map.insert(
+                            "atlas".to_string(),
+                            serde_json::Value::String(atlas.to_string()),
+                        );
+                    }
+                    map.insert(
+                        "sprite".to_string(),
+                        serde_json::Value::String(sprite.to_string()),
+                    );
+                } else {
+                    map.insert(
+                        "text".to_string(),
+                        serde_json::Value::String(atlas_sprite_fallback(atlas.as_deref(), sprite)),
+                    );
+                }
+            }
+            TextContent::Custom { key, with, .. } => {
+                map.insert(
+                    "translate".to_string(),
+                    serde_json::Value::String(key.to_string()),
+                );
+                if !with.is_empty() {
+                    let list: Vec<serde_json::Value> = with
+                        .iter()
+                        .map(|w| w.to_json_value_for_version(version))
+                        .collect();
+                    map.insert("with".to_string(), serde_json::Value::Array(list));
+                }
+            }
+            TextContent::PlayerSprite { profile, hat } => {
+                if *version >= JavaMinecraftVersion::V_26_1 {
+                    map.insert("player".to_string(), nbt_compound_to_json(&profile.0));
+                    if !hat {
+                        map.insert("hat".to_string(), serde_json::Value::Bool(false));
+                    }
+                } else {
+                    let name = profile.0.get_string("name").unwrap_or("player_sprite");
+                    map.insert(
+                        "text".to_string(),
+                        serde_json::Value::String(name.to_string()),
+                    );
+                }
+            }
+        }
+
+        if let Some(ref color) = self.style.color {
+            let color_str = match color {
+                Color::Reset => Some("reset".to_string()),
+                Color::Named(c) => Some(c.name().to_string()),
+                Color::Rgb(rgb) => {
+                    if *version >= JavaMinecraftVersion::V_1_16 {
+                        Some(format!("#{:02X}{:02X}{:02X}", rgb.red, rgb.green, rgb.blue))
+                    } else {
+                        Some(rgb.to_nearest_named().name().to_string())
+                    }
+                }
+            };
+            if let Some(cs) = color_str {
+                map.insert("color".to_string(), serde_json::Value::String(cs));
+            }
+        }
+
+        if let Some(bold) = self.style.bold {
+            map.insert("bold".to_string(), serde_json::Value::Bool(bold));
+        }
+        if let Some(italic) = self.style.italic {
+            map.insert("italic".to_string(), serde_json::Value::Bool(italic));
+        }
+        if let Some(underlined) = self.style.underlined {
+            map.insert(
+                "underlined".to_string(),
+                serde_json::Value::Bool(underlined),
+            );
+        }
+        if let Some(strikethrough) = self.style.strikethrough {
+            map.insert(
+                "strikethrough".to_string(),
+                serde_json::Value::Bool(strikethrough),
+            );
+        }
+        if let Some(obfuscated) = self.style.obfuscated {
+            map.insert(
+                "obfuscated".to_string(),
+                serde_json::Value::Bool(obfuscated),
+            );
+        }
+        if let Some(ref insertion) = self.style.insertion {
+            map.insert(
+                "insertion".to_string(),
+                serde_json::Value::String(insertion.clone()),
+            );
+        }
+        if let Some(ref font) = self.style.font {
+            map.insert("font".to_string(), serde_json::Value::String(font.clone()));
+        }
+
+        if *version >= JavaMinecraftVersion::V_1_21_4
+            && let Some(ref shadow) = self.style.shadow_color
+        {
+            map.insert(
+                "shadow_color".to_string(),
+                serde_json::json!(shadow.to_argb_int()),
+            );
+        }
+
+        if let Some(ref click) = self.style.click_event {
+            let mut click_map = serde_json::Map::new();
+            match click {
+                ClickEvent::OpenUrl { url } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("open_url".to_string()),
+                    );
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_map.insert(
+                            "url".to_string(),
+                            serde_json::Value::String(url.to_string()),
+                        );
+                    } else {
+                        click_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(url.to_string()),
+                        );
+                    }
+                }
+                ClickEvent::OpenFile { path } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("open_file".to_string()),
+                    );
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_map.insert(
+                            "path".to_string(),
+                            serde_json::Value::String(path.to_string()),
+                        );
+                    } else {
+                        click_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(path.to_string()),
+                        );
+                    }
+                }
+                ClickEvent::RunCommand { command } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("run_command".to_string()),
+                    );
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_map.insert(
+                            "command".to_string(),
+                            serde_json::Value::String(command.to_string()),
+                        );
+                    } else {
+                        click_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(command.to_string()),
+                        );
+                    }
+                }
+                ClickEvent::ShowDialog { dialog } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("show_dialog".to_string()),
+                    );
+                    click_map.insert("dialog".to_string(), dialog.0.as_ref().clone());
+                }
+                ClickEvent::Custom { id, payload } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("custom".to_string()),
+                    );
+                    click_map.insert("id".to_string(), serde_json::Value::String(id.to_string()));
+                    if let Some(payload) = payload {
+                        click_map.insert("payload".to_string(), payload.0.as_ref().clone());
+                    }
+                }
+                ClickEvent::SuggestCommand { command } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("suggest_command".to_string()),
+                    );
+                    if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_map.insert(
+                            "command".to_string(),
+                            serde_json::Value::String(command.to_string()),
+                        );
+                    } else {
+                        click_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(command.to_string()),
+                        );
+                    }
+                }
+                ClickEvent::ChangePage { page } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("change_page".to_string()),
+                    );
+                    if *version >= JavaMinecraftVersion::V_1_21_6 {
+                        click_map.insert("page".to_string(), serde_json::json!(*page as i32));
+                    } else if *version >= JavaMinecraftVersion::V_1_21_5 {
+                        click_map.insert(
+                            "page".to_string(),
+                            serde_json::Value::String(page.to_string()),
+                        );
+                    } else {
+                        click_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(page.to_string()),
+                        );
+                    }
+                }
+                ClickEvent::CopyToClipboard { value } => {
+                    click_map.insert(
+                        "action".to_string(),
+                        serde_json::Value::String("copy_to_clipboard".to_string()),
+                    );
+                    click_map.insert(
+                        "value".to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
+                }
+            }
+            let click_key = if *version >= JavaMinecraftVersion::V_1_21_5 {
+                "click_event"
+            } else {
+                "clickEvent"
+            };
+            map.insert(click_key.to_string(), serde_json::Value::Object(click_map));
+        }
+
+        if let Some(ref hover) = self.style.hover_event {
+            let mut hover_map = serde_json::Map::new();
+            if *version >= JavaMinecraftVersion::V_1_21_5 {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_text".to_string()),
+                        );
+                        if value.len() == 1 {
+                            hover_map.insert(
+                                "value".to_string(),
+                                value[0].to_json_value_for_version(version),
+                            );
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_json_value_for_version(version))
+                                .collect();
+                            hover_map.insert("value".to_string(), serde_json::Value::Array(list));
+                        }
+                    }
+                    HoverEvent::ShowItem {
+                        id,
+                        count,
+                        components,
+                    } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_item".to_string()),
+                        );
+                        hover_map
+                            .insert("id".to_string(), serde_json::Value::String(id.to_string()));
+                        if let Some(cnt) = count {
+                            hover_map.insert("count".to_string(), serde_json::json!(*cnt));
+                        }
+                        if let Some(components) = components {
+                            hover_map.insert("components".to_string(), components.0.clone());
+                        }
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_entity".to_string()),
+                        );
+                        hover_map
+                            .insert("id".to_string(), serde_json::Value::String(id.to_string()));
+                        hover_map.insert(
+                            "uuid".to_string(),
+                            serde_json::Value::String(uuid.to_string()),
+                        );
+                        if let Some(n) = name {
+                            if n.len() == 1 {
+                                hover_map.insert(
+                                    "name".to_string(),
+                                    n[0].to_json_value_for_version(version),
+                                );
+                            } else {
+                                let list = n
+                                    .iter()
+                                    .map(|e| e.to_json_value_for_version(version))
+                                    .collect();
+                                hover_map
+                                    .insert("name".to_string(), serde_json::Value::Array(list));
+                            }
+                        }
+                    }
+                }
+            } else if *version >= JavaMinecraftVersion::V_1_16 {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_text".to_string()),
+                        );
+                        if value.len() == 1 {
+                            hover_map.insert(
+                                "contents".to_string(),
+                                value[0].to_json_value_for_version(version),
+                            );
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_json_value_for_version(version))
+                                .collect();
+                            hover_map
+                                .insert("contents".to_string(), serde_json::Value::Array(list));
+                        }
+                    }
+                    HoverEvent::ShowItem {
+                        id,
+                        count,
+                        components,
+                    } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_item".to_string()),
+                        );
+                        let mut contents = serde_json::Map::new();
+                        contents
+                            .insert("id".to_string(), serde_json::Value::String(id.to_string()));
+                        if let Some(cnt) = count {
+                            contents.insert("count".to_string(), serde_json::json!(*cnt));
+                        }
+                        if let Some(components) = components {
+                            contents.insert("components".to_string(), components.0.clone());
+                        }
+                        hover_map
+                            .insert("contents".to_string(), serde_json::Value::Object(contents));
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_entity".to_string()),
+                        );
+                        let mut contents = serde_json::Map::new();
+                        contents.insert(
+                            "type".to_string(),
+                            serde_json::Value::String(id.to_string()),
+                        );
+                        contents.insert(
+                            "id".to_string(),
+                            serde_json::Value::String(uuid.to_string()),
+                        );
+                        if let Some(n) = name {
+                            if n.len() == 1 {
+                                contents.insert(
+                                    "name".to_string(),
+                                    n[0].to_json_value_for_version(version),
+                                );
+                            } else {
+                                let list = n
+                                    .iter()
+                                    .map(|e| e.to_json_value_for_version(version))
+                                    .collect();
+                                contents.insert("name".to_string(), serde_json::Value::Array(list));
+                            }
+                        }
+                        hover_map
+                            .insert("contents".to_string(), serde_json::Value::Object(contents));
+                    }
+                }
+            } else {
+                match hover {
+                    HoverEvent::ShowText { value } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_text".to_string()),
+                        );
+                        if value.len() == 1 {
+                            hover_map.insert(
+                                "value".to_string(),
+                                value[0].to_json_value_for_version(version),
+                            );
+                        } else {
+                            let list = value
+                                .iter()
+                                .map(|e| e.to_json_value_for_version(version))
+                                .collect();
+                            hover_map.insert("value".to_string(), serde_json::Value::Array(list));
+                        }
+                    }
+                    HoverEvent::ShowItem { id, count, .. } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_item".to_string()),
+                        );
+                        let count_val = count.unwrap_or(1);
+                        hover_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(format!(
+                                "{{id:\"{id}\",Count:{count_val}b}}"
+                            )),
+                        );
+                    }
+                    HoverEvent::ShowEntity { id, uuid, name } => {
+                        hover_map.insert(
+                            "action".to_string(),
+                            serde_json::Value::String("show_entity".to_string()),
+                        );
+                        let name_str = name.as_ref().map_or_else(String::new, |n| {
+                            n.iter()
+                                .map(|e| e.clone().get_text(Locale::EnUs))
+                                .collect::<String>()
+                        });
+                        hover_map.insert(
+                            "value".to_string(),
+                            serde_json::Value::String(format!(
+                                "{{id:\"{uuid}\",type:\"{id}\",name:\"{name_str}\"}}"
+                            )),
+                        );
+                    }
+                }
+            }
+            let hover_key = if *version >= JavaMinecraftVersion::V_1_21_5 {
+                "hover_event"
+            } else {
+                "hoverEvent"
+            };
+            map.insert(hover_key.to_string(), serde_json::Value::Object(hover_map));
+        }
+
+        if !self.extra.is_empty() {
+            let list: Vec<serde_json::Value> = self
+                .extra
+                .iter()
+                .map(|e| e.to_json_value_for_version(version))
+                .collect();
+            map.insert("extra".to_string(), serde_json::Value::Array(list));
+        }
+
+        serde_json::Value::Object(map)
+    }
+
+    /// Converts this component to a JSON string for a specific Minecraft version.
+    #[must_use]
+    pub fn to_json_for_version(&self, version: &JavaMinecraftVersion) -> String {
+        self.to_json_value_for_version(version).to_string()
+    }
+}
+
+fn nbt_compound_to_json(compound: &pumpkin_nbt::NbtCompound) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (k, v) in &compound.child_tags {
+        let value = if let pumpkin_nbt::tag::NbtTag::Byte(value) = v
+            && matches!(
+                k.as_ref(),
+                "bold" | "italic" | "underlined" | "strikethrough" | "obfuscated" | "hat"
+            ) {
+            serde_json::Value::Bool(*value != 0)
+        } else {
+            nbt_tag_to_json(v)
+        };
+        map.insert(k.to_string(), value);
+    }
+    serde_json::Value::Object(map)
+}
+
+fn nbt_tag_to_json(tag: &pumpkin_nbt::tag::NbtTag) -> serde_json::Value {
+    match tag {
+        pumpkin_nbt::tag::NbtTag::End => serde_json::Value::Null,
+        pumpkin_nbt::tag::NbtTag::Byte(b) => serde_json::json!(*b),
+        pumpkin_nbt::tag::NbtTag::Short(s) => serde_json::json!(*s),
+        pumpkin_nbt::tag::NbtTag::Int(i) => serde_json::json!(*i),
+        pumpkin_nbt::tag::NbtTag::Long(l) => serde_json::json!(*l),
+        pumpkin_nbt::tag::NbtTag::Float(f) => serde_json::json!(*f),
+        pumpkin_nbt::tag::NbtTag::Double(d) => serde_json::json!(*d),
+        pumpkin_nbt::tag::NbtTag::ByteArray(arr) => {
+            serde_json::Value::Array(arr.iter().map(|&x| serde_json::json!(x)).collect())
+        }
+        pumpkin_nbt::tag::NbtTag::String(s) => serde_json::Value::String(s.to_string()),
+        pumpkin_nbt::tag::NbtTag::List(list) => {
+            serde_json::Value::Array(list.iter().map(nbt_tag_to_json).collect())
+        }
+        pumpkin_nbt::tag::NbtTag::Compound(c) => nbt_compound_to_json(c),
+        pumpkin_nbt::tag::NbtTag::IntArray(arr) => {
+            serde_json::Value::Array(arr.iter().map(|&x| serde_json::json!(x)).collect())
+        }
+        pumpkin_nbt::tag::NbtTag::LongArray(arr) => {
+            serde_json::Value::Array(arr.iter().map(|&x| serde_json::json!(x)).collect())
+        }
+    }
+}
+
+impl TextComponentBase {
+    /// Converts this component to a human-readable string for console output.
+    ///
+    /// # Returns
+    /// A formatted string ready for console output.
+    #[must_use]
+    pub fn to_pretty_console(self) -> String {
+        self.to_pretty_console_inner(&Style::default())
+    }
+
+    #[expect(clippy::wrong_self_convention)]
+    fn to_pretty_console_inner(self, current_styles: &Style) -> String {
+        fn osc8_link(url: &str, text: &str) -> String {
+            format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+        }
+        /// Prioritizes `a`.
+        fn combine_styles(a: Style, b: &Style) -> Style {
+            let mut style = Style::default();
+            if let Some(color) = a.color {
+                style.color = Some(color);
+            } else {
+                style.color = b.color;
+            }
+            if let Some(bold) = a.bold {
+                style.bold = Some(bold);
+            } else {
+                style.bold = b.bold;
+            }
+            if let Some(italic) = a.italic {
+                style.italic = Some(italic);
+            } else {
+                style.italic = b.italic;
+            }
+            if let Some(underlined) = a.underlined {
+                style.underlined = Some(underlined);
+            } else {
+                style.underlined = b.underlined;
+            }
+            if let Some(strikethrough) = a.strikethrough {
+                style.strikethrough = Some(strikethrough);
+            } else {
+                style.strikethrough = b.strikethrough;
+            }
+            if let Some(click_event) = a.click_event {
+                style.click_event = Some(click_event);
+            } else {
+                style.click_event.clone_from(&b.click_event);
+            }
+            style
+        }
+
+        let mut text = match *self.content {
+            TextContent::Text { text } => text.into_owned(),
+            TextContent::Translate {
+                translate, with, ..
+            } => translation_to_pretty(format!("minecraft:{translate}"), Locale::EnUs, with),
+            TextContent::EntityNames {
+                selector,
+                separator: _,
+            } => selector.into_owned(),
+            TextContent::Keybind { keybind } => keybind.into_owned(),
+            ref content @ (TextContent::Score { .. } | TextContent::AtlasSprite { .. }) => {
+                content.plain_fallback().unwrap_or_default()
+            }
+            TextContent::Custom { key, with, .. } => translation_to_pretty(key, Locale::EnUs, with),
+            TextContent::PlayerSprite { ref profile, .. } => profile
+                .0
+                .get_string("name")
+                .map_or_else(|| "player_sprite".to_string(), ToString::to_string),
+        };
+        let style = combine_styles(*self.style, current_styles);
+        let color = style.color;
+        if let Some(color) = color {
+            text = color.console_color(&text).to_string();
+        }
+        if style.bold.is_some() {
+            text = text.bold().to_string();
+        }
+        if style.italic.is_some() {
+            text = text.italic().to_string();
+        }
+        if style.underlined.is_some() {
+            text = text.underline().to_string();
+        }
+        if style.strikethrough.is_some() {
+            text = text.strikethrough().to_string();
+        }
+        if let Some(ClickEvent::OpenUrl { url }) = style.click_event.as_ref() {
+            text = osc8_link(url, &text);
+        }
+        if let Some(ClickEvent::OpenFile { path }) = style.click_event.as_ref() {
+            text = osc8_link(&format!("file://{path}"), &text);
+        }
+
+        for child in self.extra {
+            text += &*child.to_pretty_console_inner(&style);
+        }
+        text
+    }
+
+    /// Converts this component into a raw Bedrock string, specifically for translation parameters.
+    /// Translations are emitted as `%translation.key` so Bedrock evaluates them natively.
+    #[must_use]
+    pub fn to_bedrock_string(&self) -> String {
+        let mut text = String::new();
+
+        match &*self.content {
+            TextContent::Text { text: t } => text.push_str(t),
+            TextContent::Translate {
+                translate,
+                bedrock_translate,
+                ..
+            } => {
+                let key = bedrock_translate.as_deref().unwrap_or(translate.as_ref());
+                let _ = write!(text, "%{key}");
+            }
+            TextContent::EntityNames { selector, .. } => text.push_str(selector),
+            TextContent::Keybind { keybind } => text.push_str(keybind),
+            content @ (TextContent::Score { .. } | TextContent::AtlasSprite { .. }) => {
+                text.push_str(&content.plain_fallback().unwrap_or_default());
+            }
+            TextContent::Custom { key, .. } => {
+                let _ = write!(text, "%{key}");
+            }
+            TextContent::PlayerSprite { profile, .. } => {
+                if let Some(name) = profile.0.get_string("name") {
+                    text.push_str(name);
+                }
+            }
+        }
+
+        for child in &self.extra {
+            text.push_str(&child.to_bedrock_string());
+        }
+
+        text
+    }
+
+    #[must_use]
+    pub fn to_bedrock_legacy(&self, locale: Locale) -> String {
+        let mut text = String::new();
+
+        // 1. Inject Bedrock formatting codes
+        if let Some(color) = &self.style.color {
+            match color {
+                Color::Named(named) => {
+                    let _ = write!(text, "§{}", named.to_legacy_char());
+                }
+                Color::Rgb(_rgb) => {
+                    // Bedrock doesn't strictly support Java's §x hex format.
+                    // Most Bedrock implementations fallback to Gray or ignore it.
+                }
+                Color::Reset => {
+                    // Explicitly handle the Reset variant
+                    text.push_str("§r");
+                }
+            }
+        }
+
+        if self.style.bold == Some(true) {
+            text.push_str("§l");
+        }
+        if self.style.italic == Some(true) {
+            text.push_str("§o");
+        }
+        if self.style.underlined == Some(true) {
+            text.push_str("§n");
+        }
+        if self.style.obfuscated == Some(true) {
+            text.push_str("§k");
+        }
+        // Note: Bedrock does not support strikethrough natively without resource packs.
+
+        // 2. Resolve Content
+        match &*self.content {
+            TextContent::Text { text: t } => text.push_str(t),
+            TextContent::Translate {
+                translate,
+                bedrock_translate,
+                with,
+                ..
+            } => {
+                let key = bedrock_translate.as_ref().unwrap_or(translate);
+                text.push_str(&get_translation_text(key.to_string(), locale, with.clone()));
+            }
+            TextContent::EntityNames { selector, .. } => text.push_str(selector),
+            TextContent::Keybind { keybind } => text.push_str(keybind),
+            content @ (TextContent::Score { .. } | TextContent::AtlasSprite { .. }) => {
+                text.push_str(&content.plain_fallback().unwrap_or_default());
+            }
+            TextContent::Custom { key, with, .. } => {
+                text.push_str(&get_translation_text(key.clone(), locale, with.clone()));
+            }
+            TextContent::PlayerSprite { profile, .. } => {
+                if let Some(name) = profile.0.get_string("name") {
+                    text.push_str(name);
+                }
+            }
+        }
+
+        // 3. Recursively append extra components
+        for child in &self.extra {
+            text.push_str(&child.to_bedrock_legacy(locale));
+            // Bedrock styles bleed into subsequent text. We append a reset code
+            // to ensure child styles are properly isolated from one another.
+            text.push_str("§r");
+        }
+
+        text
+    }
+
+    /// Extracts the raw text content of this component for the given locale.
+    ///
+    /// # Arguments
+    /// - `locale` – The locale to use for translations.
+    ///
+    /// # Returns
+    /// The plain text content of the component.
+    #[must_use]
+    pub fn get_text(self, locale: Locale) -> String {
+        let mut text = match *self.content {
+            TextContent::Text { text } => text.into_owned(),
+            TextContent::Translate {
+                translate,
+                bedrock_translate,
+                with,
+                ..
+            } => {
+                let key = bedrock_translate.as_ref().unwrap_or(&translate);
+                get_translation_text(format!("minecraft:{key}"), locale, with)
+            }
+            TextContent::EntityNames {
+                selector,
+                separator: _,
+            } => selector.into_owned(),
+            TextContent::Keybind { keybind } => keybind.into_owned(),
+            ref content @ (TextContent::Score { .. } | TextContent::AtlasSprite { .. }) => {
+                content.plain_fallback().unwrap_or_default()
+            }
+            TextContent::Custom { key, with, .. } => get_translation_text(key, locale, with),
+            TextContent::PlayerSprite { profile, .. } => profile
+                .0
+                .get_string("name")
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        };
+
+        // Recursively append the text of all child components
+        for child in self.extra {
+            text += &child.get_text(locale);
+        }
+
+        text
+    }
+
+    /// Converts this component by resolving all translations.
+    ///
+    /// # Returns
+    /// A new component with all translations resolved.
+    fn translate_hover_event(style: &mut Style) {
+        if let Some(ref hover) = style.hover_event {
+            style.hover_event = match hover {
+                HoverEvent::ShowText { value } => {
+                    let mut hover_components = vec![];
+                    for hover_component in value {
+                        hover_components.push(hover_component.to_owned().to_translated());
+                    }
+                    Some(HoverEvent::ShowText {
+                        value: hover_components,
+                    })
+                }
+                HoverEvent::ShowEntity { name, id, uuid } => name.as_ref().map_or_else(
+                    || {
+                        Some(HoverEvent::ShowEntity {
+                            name: None,
+                            id: id.clone(),
+                            uuid: uuid.clone(),
+                        })
+                    },
+                    |name| {
+                        Some(HoverEvent::ShowEntity {
+                            name: Some(name.iter().map(|x| x.to_owned().to_translated()).collect()),
+                            id: id.clone(),
+                            uuid: uuid.clone(),
+                        })
+                    },
+                ),
+                HoverEvent::ShowItem {
+                    id,
+                    count,
+                    components,
+                } => Some(HoverEvent::ShowItem {
+                    id: id.clone(),
+                    count: count.to_owned(),
+                    components: components.clone(),
+                }),
+            };
+        }
+    }
+
+    /// Converts this component by resolving all translations.
+    ///
+    /// # Returns
+    /// A new component with all translations resolved.
+    #[must_use]
+    pub fn to_translated(self) -> Self {
+        // NOTE: Divide the translation into slices and inserts the substitutions.
+        let component = match *self.content {
+            TextContent::Translate {
+                translate,
+                bedrock_translate,
+                with,
+                fallback,
+            } => {
+                let mut translated_with = vec![];
+                for w in with {
+                    translated_with.push(w.to_translated());
+                }
+                Self {
+                    content: Box::new(TextContent::Translate {
+                        translate,
+                        bedrock_translate,
+                        with: translated_with,
+                        fallback,
+                    }),
+                    style: self.style,
+                    extra: self.extra,
+                }
+            }
+            TextContent::Custom { key, with, locale } => {
+                let translation = get_translation(&key, locale);
+                let mut translation_parent = translation.clone();
+                let mut translation_slices = vec![];
+
+                if translation.contains('%') {
+                    let (substitutions, ranges) = reorder_substitutions(&translation, with);
+                    for (idx, &range) in ranges.iter().enumerate() {
+                        if idx == 0 {
+                            translation_parent = translation[..range.start].to_string();
+                        }
+                        translation_slices.push(substitutions[idx].clone());
+                        if range.end >= translation.len() - 1 {
+                            continue;
+                        }
+
+                        translation_slices.push(Self {
+                            content: Box::new(TextContent::Text {
+                                text: if idx == ranges.len() - 1 {
+                                    // Last substitution, append the rest of the translation
+                                    Cow::Owned(translation[range.end + 1..].to_string())
+                                } else {
+                                    Cow::Owned(
+                                        translation[range.end + 1..ranges[idx + 1].start]
+                                            .to_string(),
+                                    )
+                                },
+                            }),
+                            style: Box::new(Style::default()),
+                            extra: vec![],
+                        });
+                    }
+                }
+                for i in self.extra {
+                    translation_slices.push(i);
+                }
+                Self {
+                    content: Box::new(TextContent::Text {
+                        text: translation_parent.into(),
+                    }),
+                    style: self.style,
+                    extra: translation_slices,
+                }
+            }
+            _ => self, // If not a translation, return as is
+        };
+        // Ensure that the extra components are translated
+        let extra = component
+            .extra
+            .into_iter()
+            .map(Self::to_translated)
+            .collect();
+
+        // If the hover event is present, it will also be translated
+        let mut style = component.style;
+        Self::translate_hover_event(&mut style);
+
+        Self {
+            content: component.content,
+            style,
+            extra,
+        }
+    }
+}
+
+impl TextComponent {
+    /// Creates a new text component without any text content.
+    ///
+    /// Useful to join multiple text components together into one
+    /// by putting them all as a child of an empty text component
+    /// in the required order.
+    ///
+    /// # Returns
+    /// An empty `TextComponent`.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::text("")
+    }
+
+    /// Parses a text component from its NBT representation
+    #[must_use]
+    pub fn from_nbt(tag: &pumpkin_nbt::tag::NbtTag) -> Self {
+        Self::deserialize(nbt_de::TagDeserializer(tag)).unwrap_or_else(|_| Self::empty())
+    }
+
+    /// Creates a new text component with plain text content.
+    ///
+    /// # Arguments
+    /// - `plain` – The text content (can be `String`, `&str`, or `Cow <'static, str>`).
+    ///
+    /// # Returns
+    /// A new `TextComponent` containing the given text.
+    #[must_use]
+    pub fn text<P: Into<Cow<'static, str>>>(plain: P) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Text { text: plain.into() }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a new text component with a translation key.
+    ///
+    /// # Arguments
+    /// - `key` – The translation key (e.g., "multiplayer.player.joined").
+    /// - `with` – The substitution parameters for the translation.
+    ///
+    /// # Returns
+    /// A new `TextComponent` that will be translated on the client.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use the `pumpkin_macros::translate_java!` macro instead for compile-time translation key and parameter checking."
+    )]
+    #[must_use]
+    pub fn translate<K: Into<Cow<'static, str>>, W: Into<Vec<Self>>>(key: K, with: W) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Translate {
+                translate: key.into(),
+                bedrock_translate: None,
+                with: with.into().into_iter().map(|x| x.0).collect(),
+                fallback: None,
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a new text component with a translation key that has a Bedrock-specific fallback.
+    ///
+    /// # Arguments
+    /// - `java_key` – The translation key for Java (e.g., "multiplayer.player.joined").
+    /// - `bedrock_key` – The translation key for Bedrock (e.g., "multiplayer.player.joined").
+    /// - `with` – The substitution parameters for the translation.
+    ///
+    /// # Returns
+    /// A new `TextComponent` that will be translated natively on both clients.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use the `pumpkin_macros::translate_cross!` macro instead for compile-time translation key and parameter checking."
+    )]
+    #[must_use]
+    pub fn translate_cross<
+        K1: Into<Cow<'static, str>>,
+        K2: Into<Cow<'static, str>>,
+        W: Into<Vec<Self>>,
+    >(
+        java_key: K1,
+        bedrock_key: K2,
+        with: W,
+    ) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Translate {
+                translate: java_key.into(),
+                bedrock_translate: Some(bedrock_key.into()),
+                with: with.into().into_iter().map(|x| x.0).collect(),
+                fallback: None,
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a new text component with a custom translation key.
+    ///
+    /// # Arguments
+    /// - `namespace` – The namespace for the translation (e.g. "pumpkinplus").
+    /// - `key` – The translation key within the namespace.
+    /// - `locale` – The locale to use for translation.
+    /// - `with` – The substitution parameters for the translation.
+    ///
+    /// # Returns
+    /// A new `TextComponent` with custom translation.
+    #[must_use]
+    pub fn custom<K: Into<Cow<'static, str>>, W: Into<Vec<Self>>>(
+        namespace: K,
+        key: K,
+        locale: Locale,
+        with: W,
+    ) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Custom {
+                key: format!("{}:{}", namespace.into(), key.into())
+                    .to_lowercase()
+                    .into(),
+                locale,
+                with: with.into().into_iter().map(|x| x.0).collect(),
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a new text component displaying the name of one or more entities found by a selector.
+    ///
+    /// # Arguments
+    /// - `selector` – The entity selector string (e.g. `@e[type=pig]`).
+    /// - `separator` – Optional separator string between multiple entity names.
+    ///
+    /// # Returns
+    /// A new `TextComponent` displaying entity names.
+    #[must_use]
+    pub fn entity_names<S: Into<Cow<'static, str>>, P: Into<Cow<'static, str>>>(
+        selector: S,
+        separator: Option<P>,
+    ) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::EntityNames {
+                selector: selector.into(),
+                separator: separator.map(Into::into),
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a new text component displaying a keybind identifier.
+    ///
+    /// # Arguments
+    /// - `keybind` – The keybind identifier (e.g. `key.jump`, `key.forward`).
+    ///
+    /// # Returns
+    /// A new `TextComponent` displaying the configured key.
+    #[must_use]
+    pub fn keybind<K: Into<Cow<'static, str>>>(keybind: K) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Keybind {
+                keybind: keybind.into(),
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Appends a child component to this component.
+    ///
+    /// # Arguments
+    /// - `child` – The component to append.
+    ///
+    /// # Returns
+    /// The component with the child added.
+    #[must_use]
+    pub fn add_child(mut self, child: Self) -> Self {
+        self.0.extra.push(child.0);
+        self
+    }
+
+    /// Creates a new component from raw content.
+    ///
+    /// # Arguments
+    /// - `content` – The text content.
+    ///
+    /// # Returns
+    /// A new component with the given content.
+    #[must_use]
+    pub fn from_content(content: TextContent) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(content),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Appends plain text to this component.
+    ///
+    /// # Arguments
+    /// - `text` – The text to append.
+    ///
+    /// # Returns
+    /// The component with the text appended.
+    #[must_use]
+    pub fn add_text<P: Into<Cow<'static, str>>>(mut self, text: P) -> Self {
+        self.0.extra.push(TextComponentBase {
+            content: Box::new(TextContent::Text { text: text.into() }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        });
+        self
+    }
+
+    /// Extracts the raw text content for English (US).
+    ///
+    /// # Returns
+    /// The plain text content.
+    #[must_use]
+    pub fn get_text(self) -> String {
+        self.0.get_text(Locale::EnUs)
+    }
+
+    /// [`Self::chat_decorated`] with a component name (a plugin-set display name with its
+    /// prefix and colours) in place of `{DISPLAYNAME}`.
+    #[must_use]
+    pub fn chat_decorated_with_name(format: &str, player_name: Self, content: &str) -> Self {
+        let format = format.replace('&', "§");
+        let Some((before, after)) = format.split_once("{DISPLAYNAME}") else {
+            return Self::text(format.replace("{MESSAGE}", content));
+        };
+        Self::text(before.replace("{MESSAGE}", content))
+            .add_child(player_name)
+            .add_child(Self::text(after.replace("{MESSAGE}", content)))
+    }
+
+    /// Creates a chat message with formatting placeholders replaced.
+    ///
+    /// Replaces:
+    /// - `&` with `§` for legacy formatting
+    /// - `{DISPLAYNAME}` with the player's name
+    /// - `{MESSAGE}` with the chat message content
+    ///
+    /// # Arguments
+    /// - `format` – The message format string.
+    /// - `player_name` – The player's display name.
+    /// - `content` – The chat message content.
+    ///
+    /// # Returns
+    /// A formatted chat component.
+    #[must_use]
+    pub fn chat_decorated(format: &str, player_name: &str, content: &str) -> Self {
+        // Todo: maybe allow players to use & in chat contingent on permissions
+        let with_resolved_fields = format
+            .replace('&', "§")
+            .replace("{DISPLAYNAME}", player_name)
+            .replace("{MESSAGE}", content);
+
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Text {
+                text: Cow::Owned(with_resolved_fields),
+            }),
+            style: Box::new(Style::default()),
+            extra: vec![],
+        })
+    }
+
+    /// Converts this component to a pretty console string.
+    ///
+    /// # Returns
+    /// A formatted string ready for console output.
+    #[must_use]
+    pub fn to_pretty_console(self) -> String {
+        self.0.to_pretty_console()
+    }
+}
+
+impl TextComponent {
+    /// Creates a score component (vanilla `Component.score`).
+    #[must_use]
+    pub fn score<N: Into<Cow<'static, str>>, O: Into<Cow<'static, str>>>(
+        name: N,
+        objective: O,
+    ) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::Score {
+                score: ScoreContents {
+                    name: name.into(),
+                    objective: objective.into(),
+                },
+            }),
+            style: Box::default(),
+            extra: vec![],
+        })
+    }
+
+    /// Creates an atlas sprite component (vanilla `Component.object(new AtlasSprite(..))`);
+    /// `atlas` defaults to `minecraft:blocks`.
+    #[must_use]
+    pub fn atlas_sprite<S: Into<Cow<'static, str>>>(
+        atlas: Option<Cow<'static, str>>,
+        sprite: S,
+    ) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::AtlasSprite {
+                atlas,
+                sprite: sprite.into(),
+            }),
+            style: Box::default(),
+            extra: vec![],
+        })
+    }
+
+    /// Creates a player sprite component.
+    #[must_use]
+    pub fn player_sprite(profile: pumpkin_nbt::NbtCompound, hat: bool) -> Self {
+        Self(TextComponentBase {
+            content: Box::new(TextContent::PlayerSprite {
+                profile: ProfileNbt(profile),
+                hat,
+            }),
+            style: Box::default(),
+            extra: vec![],
+        })
+    }
+
+    /// Encodes this component into a byte array using NBT serialization for the latest Minecraft version.
+    ///
+    /// # Returns
+    /// A boxed byte slice containing the NBT-encoded component.
+    #[must_use]
+    pub fn encode(&self) -> Box<[u8]> {
+        self.encode_for_version(&JavaMinecraftVersion::V_26_3)
+    }
+
+    /// Encodes this component into a byte array using NBT serialization for a specific Minecraft version.
+    ///
+    /// # Arguments
+    /// - `version` – The Minecraft version to encode for.
+    ///
+    /// # Returns
+    /// A boxed byte slice containing the NBT-encoded component.
+    #[must_use]
+    pub fn encode_for_version(&self, version: &JavaMinecraftVersion) -> Box<[u8]> {
+        let tag = self
+            .0
+            .clone()
+            .to_translated()
+            .to_nbt_tag_for_version(version);
+        let mut bytes = Vec::new();
+        let mut writer = pumpkin_nbt::serializer::NbtWriteHelperJava::new(&mut bytes);
+        let _ = tag.serialize(&mut writer);
+        bytes.into_boxed_slice()
+    }
+
+    /// Converts this component to an NBT compound tag for a specific Minecraft version.
+    #[must_use]
+    pub fn to_nbt_compound_for_version(
+        &self,
+        version: &JavaMinecraftVersion,
+    ) -> pumpkin_nbt::NbtCompound {
+        self.0
+            .clone()
+            .to_translated()
+            .to_nbt_compound_for_version(version)
+    }
+
+    /// Converts this component to an `NbtTag` for a specific Minecraft version.
+    #[must_use]
+    pub fn to_nbt_tag_for_version(
+        &self,
+        version: &JavaMinecraftVersion,
+    ) -> pumpkin_nbt::tag::NbtTag {
+        self.0
+            .clone()
+            .to_translated()
+            .to_nbt_tag_for_version(version)
+    }
+
+    /// Converts this component to a JSON string for a specific Minecraft version.
+    #[must_use]
+    pub fn to_json_for_version(&self, version: &JavaMinecraftVersion) -> String {
+        self.0.clone().to_translated().to_json_for_version(version)
+    }
+
+    /// Converts this component to a `serde_json::Value` for a specific Minecraft version.
+    #[must_use]
+    pub fn to_json_value_for_version(&self, version: &JavaMinecraftVersion) -> serde_json::Value {
+        self.0
+            .clone()
+            .to_translated()
+            .to_json_value_for_version(version)
+    }
+
+    /// Sets the text color.
+    ///
+    /// # Arguments
+    /// - `color` – The color to apply.
+    ///
+    /// # Returns
+    /// The component with the color set.
+    #[must_use]
+    pub fn color(mut self, color: Color) -> Self {
+        self.0.style.color = Some(color);
+        self
+    }
+
+    /// Sets the text color using a named Minecraft color.
+    ///
+    /// # Arguments
+    /// - `color` – The named color to apply.
+    ///
+    /// # Returns
+    /// The component with the color set.
+    #[must_use]
+    pub fn color_named(mut self, color: color::NamedColor) -> Self {
+        self.0.style.color = Some(Color::Named(color));
+        self
+    }
+
+    /// Sets the text color using an RGB color.
+    ///
+    /// # Arguments
+    /// - `color` – The RGB color to apply.
+    ///
+    /// # Returns
+    /// The component with the color set.
+    #[must_use]
+    pub fn color_rgb(mut self, color: color::RGBColor) -> Self {
+        self.0.style.color = Some(Color::Rgb(color));
+        self
+    }
+
+    /// Appends a new line/line break.
+    ///
+    /// # Returns
+    /// The component with a new line appended.
+    #[must_use]
+    pub fn new_line(self) -> Self {
+        self.add_child(Self::text("\n"))
+    }
+
+    /// Applies a color gradient to the text using named colors.
+    ///
+    /// # Arguments
+    /// - `colors` – The gradient colors to apply.
+    ///
+    /// # Returns
+    /// The component with the gradient applied.
+    #[must_use]
+    pub fn gradient_named(self, colors: &[color::NamedColor]) -> Self {
+        let rgb_colors: Vec<color::RGBColor> =
+            colors.iter().map(color::NamedColor::to_rgb).collect();
+        self.gradient(&rgb_colors)
+    }
+
+    /// Applies a color gradient to the text using RGB colors.
+    ///
+    /// # Arguments
+    /// - `colors` – The gradient colors to apply.
+    ///
+    /// # Returns
+    /// The component with the gradient applied.
+    #[must_use]
+    pub fn gradient(self, colors: &[color::RGBColor]) -> Self {
+        if colors.len() < 2 {
+            return self;
+        }
+
+        self.apply_color_effect(|i, len| {
+            if len <= 1 {
+                return colors[0];
+            }
+            let total_segments = colors.len() - 1;
+            let position = i as f32 / (len - 1) as f32;
+            let segment_f = position * total_segments as f32;
+            let segment_index = (segment_f.floor() as usize).min(total_segments - 1);
+
+            let local_t = segment_f - segment_index as f32;
+            let start = colors[segment_index];
+            let end = colors[segment_index + 1];
+
+            // LERP logic
+            color::RGBColor::new(
+                (f32::from(end.red) - f32::from(start.red)).mul_add(local_t, f32::from(start.red))
+                    as u8,
+                (f32::from(end.green) - f32::from(start.green))
+                    .mul_add(local_t, f32::from(start.green)) as u8,
+                (f32::from(end.blue) - f32::from(start.blue))
+                    .mul_add(local_t, f32::from(start.blue)) as u8,
+            )
+        })
+    }
+
+    /// Applies a rainbow effect to the text.
+    ///
+    /// Each character gets a different hue, creating a smooth rainbow transition.
+    ///
+    /// # Returns
+    /// The component with the rainbow effect applied.
+    #[must_use]
+    pub fn rainbow(self) -> Self {
+        self.apply_color_effect(|i, len| {
+            let hue = (i as f32 / len as f32) * 360.0;
+            let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
+            color::RGBColor::new(r, g, b)
+        })
+    }
+
+    /// Applies a per-character color effect to the text content.
+    ///
+    /// # Arguments
+    /// - `color_gen` – A function that takes the character index and total length
+    ///   and returns an RGB color for that character.
+    ///
+    /// # Returns
+    /// A new text component where each character is individually colored according
+    /// to the generator function. The original component's content becomes empty,
+    /// and the colored characters are placed in the `extra` field.
+    fn apply_color_effect<F>(mut self, color_gen: F) -> Self
+    where
+        F: Fn(usize, usize) -> color::RGBColor,
+    {
+        let raw_text = self.0.clone().get_text(Locale::EnUs);
+        let chars: Vec<char> = raw_text.chars().collect();
+        let len = chars.len();
+
+        if len == 0 {
+            return self;
+        }
+
+        let mut colored_extra = Vec::new();
+        for (i, c) in chars.into_iter().enumerate() {
+            let rgb = color_gen(i, len);
+
+            let mut char_base = TextComponentBase {
+                content: Box::new(TextContent::Text {
+                    text: Cow::Owned(c.to_string()),
+                }),
+                style: self.0.style.clone(),
+                extra: vec![],
+            };
+            char_base.style.color = Some(Color::Rgb(rgb));
+            colored_extra.push(char_base);
+        }
+
+        self.0.content = Box::new(TextContent::Text { text: "".into() });
+        self.0.extra = colored_extra;
+        self.0.style.click_event = None;
+        self.0.style.hover_event = None;
+        self
+    }
+
+    /// Wraps a component in square brackets.
+    ///
+    /// # Returns
+    /// The new component.
+    #[allow(deprecated)]
+    #[must_use]
+    pub fn wrap_in_square_brackets(self) -> Self {
+        Self::translate("chat.square_brackets", [self])
+    }
+
+    /// Makes the text bold.
+    ///
+    /// # Returns
+    /// The component with bold enabled.
+    #[must_use]
+    pub fn bold(mut self) -> Self {
+        self.0.style.bold = Some(true);
+        self
+    }
+
+    /// Makes the text italic.
+    ///
+    /// # Returns
+    /// The component with italic enabled.
+    #[must_use]
+    pub fn italic(mut self) -> Self {
+        self.0.style.italic = Some(true);
+        self
+    }
+
+    /// Makes the text underlined.
+    ///
+    /// # Returns
+    /// The component with underline enabled.
+    #[must_use]
+    pub fn underlined(mut self) -> Self {
+        self.0.style.underlined = Some(true);
+        self
+    }
+
+    /// Makes the text strikethrough.
+    ///
+    /// # Returns
+    /// The component with strikethrough enabled.
+    #[must_use]
+    pub fn strikethrough(mut self) -> Self {
+        self.0.style.strikethrough = Some(true);
+        self
+    }
+
+    /// Makes the text obfuscated (random characters).
+    ///
+    /// # Returns
+    /// The component with obfuscation enabled.
+    #[must_use]
+    pub fn obfuscated(mut self) -> Self {
+        self.0.style.obfuscated = Some(true);
+        self
+    }
+
+    /// Sets text to be inserted into the player's chat input when shift-clicked.
+    ///
+    /// When the text is shift-clicked by a player, this string is inserted in their
+    /// chat input. It does not overwrite any existing text the player was writing.
+    /// This only works in chat messages.
+    ///
+    /// # Arguments
+    /// - `text` – The text to insert when shift-clicked.
+    ///
+    /// # Returns
+    /// The component with the insertion text set.
+    #[must_use]
+    pub fn insertion(mut self, text: String) -> Self {
+        self.0.style.insertion = Some(text);
+        self
+    }
+
+    /// Sets an event to occur when the player clicks on the text.
+    ///
+    /// Allows for actions like running commands, opening URLs, suggesting commands,
+    /// or copying text to clipboard. Only works in chat.
+    ///
+    /// # Arguments
+    /// - `event` – The click event to trigger.
+    ///
+    /// # Returns
+    /// The component with the click event set.
+    #[must_use]
+    pub fn click_event(mut self, event: ClickEvent) -> Self {
+        self.0.style.click_event = Some(event);
+        self
+    }
+
+    /// Sets a tooltip to be displayed when the player hovers over the text.
+    ///
+    /// Can show plain text, item information, or entity details.
+    ///
+    /// # Arguments
+    /// - `event` – The hover event to display.
+    ///
+    /// # Returns
+    /// The component with the hover event set.
+    #[must_use]
+    pub fn hover_event(mut self, event: HoverEvent) -> Self {
+        self.0.style.hover_event = Some(event);
+        self
+    }
+
+    /// Sets the font resource location for rendering.
+    ///
+    /// Allows changing the font face of the text. Default fonts include:
+    /// - `minecraft:default` - The standard Minecraft font.
+    /// - `minecraft:uniform` - A uniform-width font.
+    /// - `minecraft:alt` - An alternative font style.
+    /// - `minecraft:illageralt` - The illager-themed font.
+    ///
+    /// # Arguments
+    /// - `resource_location` – The font resource location (e.g., "minecraft:uniform").
+    ///
+    /// # Returns
+    /// The component with the font set.
+    #[must_use]
+    pub fn font(mut self, resource_location: String) -> Self {
+        self.0.style.font = Some(resource_location);
+        self
+    }
+
+    /// Overrides the shadow color of the text.
+    ///
+    /// # Arguments
+    /// - `color` – The ARGB color value for the shadow.
+    ///
+    /// # Returns
+    /// The component with the shadow color set.
+    #[must_use]
+    pub fn shadow_color(mut self, color: ARGBColor) -> Self {
+        self.0.style.shadow_color = Some(color);
+        self
+    }
+}
+
+impl TextComponent {
+    /// Joins multiple text components into one with a separator containing a gray comma
+    /// and a space after it.
+    ///
+    /// # Arguments
+    /// - `elements` - The elements to join.
+    ///
+    /// # Returns
+    /// The resultant text component with all the elements joined in it.
+    #[must_use]
+    pub fn join_with_comma(elements: Vec<Self>) -> Self {
+        static DEFAULT_SEPARATOR: LazyLock<TextComponent> = LazyLock::new(|| {
+            TextComponent::text(", ").color(Color::Named(color::NamedColor::Gray))
+        });
+
+        Self::join(elements, &DEFAULT_SEPARATOR)
+    }
+
+    /// Joins multiple text components into one with the given separator text component.
+    /// Use [`TextComponent::join_with_comma`] instead if you just want to join text components with
+    /// a comma in between.
+    ///
+    /// # Arguments
+    /// - `elements` - The elements to join.
+    /// - `separator` - The separator to use for joining the elements provided.
+    ///
+    /// # Returns
+    /// The resultant text component with all the elements joined in it.
+    #[must_use]
+    pub fn join(elements: Vec<Self>, separator: &Self) -> Self {
+        let mut result = Self::empty();
+        let mut first = true;
+
+        for element in elements {
+            if !first {
+                result = result.add_child(separator.clone());
+            }
+
+            result = result.add_child(element);
+            first = false;
+        }
+
+        result
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProfileNbt(pub pumpkin_nbt::NbtCompound);
+
+impl Eq for ProfileNbt {}
+
+impl std::hash::Hash for ProfileNbt {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_string().hash(state);
+    }
+}
+
+impl Serialize for ProfileNbt {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        nbt_compound_to_json(&self.0).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProfileNbt {
+    /// Reads what vanilla's `ResolvableProfile` codec reads: a player name, or a
+    /// compound with `name`, `id`, `properties` or skin overrides.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut profile = pumpkin_nbt::NbtCompound::new();
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(name) if is_valid_player_name(&name) => {
+                profile.put_string("name", name);
+            }
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    let tag = if key == "id" {
+                        // A UUID is four ints, sent as an int array.
+                        let Ok(id) = serde_json::from_value::<[i32; 4]>(value) else {
+                            return Err(serde::de::Error::custom("a profile id is four ints"));
+                        };
+                        pumpkin_nbt::tag::NbtTag::IntArray(id.to_vec())
+                    } else if !is_valid_profile_field(&key, &value) {
+                        return Err(serde::de::Error::custom(format!("invalid profile {key}")));
+                    } else {
+                        hover::json_to_nbt(&value)
+                    };
+                    profile.put(&key, tag);
+                }
+            }
+            _ => return Err(serde::de::Error::custom("expected a name or a compound")),
+        }
+        // The profile is sent on as it is, and NBT can't hold a string over 65535 bytes.
+        let mut writer = pumpkin_nbt::serializer::NbtWriteHelperJava::new(std::io::sink());
+        if profile.clone().serialize_content(&mut writer).is_err() {
+            return Err(serde::de::Error::custom("the profile doesn't fit in NBT"));
+        }
+        Ok(Self(profile))
+    }
+}
+
+/// Vanilla's `StringUtil.isValidPlayerName`, which its `PLAYER_NAME` codec checks:
+/// at most 16 characters, each from `!` to `~`.
+fn is_valid_player_name(name: &str) -> bool {
+    name.len() <= 16 && name.as_bytes().iter().all(u8::is_ascii_graphic)
+}
+
+/// What vanilla's `ResolvableProfile` codec takes in a profile field other than
+/// `id`. It ignores the fields it doesn't know.
+fn is_valid_profile_field(key: &str, value: &serde_json::Value) -> bool {
+    match key {
+        "name" => value.as_str().is_some_and(is_valid_player_name),
+        "properties" => is_valid_property_map(value),
+        // `PlayerSkin.Patch`: three texture identifiers and the model.
+        "texture" | "cape" | "elytra" => value
+            .as_str()
+            .is_some_and(|texture| Identifier::parse(texture).is_ok()),
+        "model" => matches!(value.as_str(), Some("slim" | "wide")),
+        _ => true,
+    }
+}
+
+const MAX_PROPERTY_NAME_LENGTH: usize = 64;
+const MAX_PROPERTY_VALUE_LENGTH: usize = 32767;
+const MAX_PROPERTY_SIGNATURE_LENGTH: usize = 1024;
+const MAX_PROPERTIES: usize = 16;
+
+/// Vanilla's `ExtraCodecs.PROPERTY_MAP`: a list of properties, or a map of names
+/// to values. Vanilla writes the map back as the list, and a client hashes an
+/// item that way when it's clicked, so the list's limits hold for the map too.
+fn is_valid_property_map(properties: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    // Vanilla counts a string's length in UTF-16 units.
+    let fits = |text: &str, max| text.encode_utf16().nth(max).is_none();
+    let string_fits = |text: &Value, max| text.as_str().is_some_and(|text| fits(text, max));
+    match properties {
+        Value::Array(list) => {
+            list.len() <= MAX_PROPERTIES
+                && list.iter().all(|property| {
+                    let field = |name, max| property.get(name).map(|text| string_fits(text, max));
+                    field("name", MAX_PROPERTY_NAME_LENGTH) == Some(true)
+                        && field("value", MAX_PROPERTY_VALUE_LENGTH) == Some(true)
+                        // A property doesn't need a signature.
+                        && field("signature", MAX_PROPERTY_SIGNATURE_LENGTH) != Some(false)
+                })
+        }
+        Value::Object(map) => {
+            let values = || map.values().filter_map(Value::as_array).flatten();
+            map.len() <= MAX_PROPERTIES
+                && map.keys().all(|name| fits(name, MAX_PROPERTY_NAME_LENGTH))
+                && map.values().all(Value::is_array)
+                && values().count() <= MAX_PROPERTIES
+                && values().all(|value| string_fits(value, MAX_PROPERTY_VALUE_LENGTH))
+        }
+        _ => false,
+    }
+}
+
+/// The content type of the text component.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(untagged)]
+pub enum TextContent {
+    /// Raw, untranslated text.
+    Text { text: Cow<'static, str> },
+    /// Text that should be translated on the client.
+    Translate {
+        /// The translation key (e.g. "multiplayer.player.joined").
+        translate: Cow<'static, str>,
+        /// Bedrock translation key. If specified, Bedrock clients receive an `SText::translation` packet.
+        #[serde(skip, default)]
+        bedrock_translate: Option<Cow<'static, str>>,
+        /// Substitution parameters for the translation.
+        #[serde(
+            default,
+            skip_serializing_if = "Vec::is_empty",
+            deserialize_with = "short_form::arguments"
+        )]
+        with: Vec<TextComponentBase>,
+        /// Shown by clients that don't know the key (Adventure `fallback`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback: Option<Cow<'static, str>>,
+    },
+    /// Displays the name of one or more entities found by a selector.
+    EntityNames {
+        /// The entity selector string (e.g., "@e[type=pig]").
+        selector: Cow<'static, str>,
+        /// Optional separator between multiple entity names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        separator: Option<Cow<'static, str>>,
+    },
+    /// A keybind identifier for a configurable control.
+    ///
+    /// See <https://minecraft.wiki/w/Controls#Configurable_controls> for available keybinds.
+    Keybind {
+        /// The keybind identifier (e.g., "key.forward").
+        keybind: Cow<'static, str>,
+    },
+    /// A scoreboard score (vanilla `ScoreContents`): the score of `name` (a player name, a
+    /// score holder or a selector) in `objective`. Sent as is; the client shows it once the
+    /// server resolved it, like vanilla's own unresolved score components.
+    Score { score: ScoreContents },
+    /// A sprite from a texture atlas (vanilla `object` component with `AtlasSprite`).
+    /// Clients before 26.1 get vanilla's fallback text (`[sprite]` or `[sprite@atlas]`).
+    AtlasSprite {
+        /// The atlas; vanilla's default is `minecraft:blocks`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        atlas: Option<Cow<'static, str>>,
+        /// The sprite id inside the atlas (e.g. `item/diamond`).
+        sprite: Cow<'static, str>,
+    },
+    /// A custom translation key for modded content.
+    ///
+    /// This variant is not serialized directly; translations are resolved
+    /// before serialization using `to_translated()`.
+    #[serde(skip)]
+    Custom {
+        /// The full translation key with namespace (e.g. "pumpkinplus:some.text").
+        key: Cow<'static, str>,
+        /// The locale to use for translation.
+        locale: Locale,
+        /// Substitution parameters for the translation.
+        with: Vec<TextComponentBase>,
+    },
+    /// A player's head: vanilla's `object` component with `object: "player"`.
+    /// Clients before 26.1 get the player's name as text instead.
+    PlayerSprite {
+        #[serde(rename = "player")]
+        profile: ProfileNbt,
+        /// Whether the hat layer is drawn over the head.
+        #[serde(default = "default_hat", deserialize_with = "bool_or_byte")]
+        hat: bool,
+    },
+}
+
+/// The `score` object of a score component.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ScoreContents {
+    /// The score holder: a player name, a score holder name or a selector.
+    pub name: Cow<'static, str>,
+    /// The objective's name.
+    pub objective: Cow<'static, str>,
+}
+
+/// Vanilla `AtlasSprite.DEFAULT_ATLAS`.
+const DEFAULT_SPRITE_ATLAS: &str = "minecraft:blocks";
+
+/// Vanilla `AtlasSprite.toShortName`: the id without the `minecraft` namespace.
+fn short_sprite_name(id: &str) -> &str {
+    id.strip_prefix("minecraft:").unwrap_or(id)
+}
+
+/// Vanilla `AtlasSprite.defaultFallback`: `[sprite]`, or `[sprite@atlas]` for another atlas.
+fn atlas_sprite_fallback(atlas: Option<&str>, sprite: &str) -> String {
+    let sprite = short_sprite_name(sprite);
+    match atlas {
+        Some(atlas) if atlas != DEFAULT_SPRITE_ATLAS && atlas != "blocks" => {
+            format!("[{sprite}@{}]", short_sprite_name(atlas))
+        }
+        _ => format!("[{sprite}]"),
+    }
+}
+
+impl TextContent {
+    /// The plain text shown where the client cannot render this content (consoles, Bedrock,
+    /// legacy strings): nothing for a score, vanilla's fallback for an atlas sprite.
+    fn plain_fallback(&self) -> Option<String> {
+        match self {
+            Self::Score { .. } => Some(String::new()),
+            Self::AtlasSprite { atlas, sprite } => {
+                Some(atlas_sprite_fallback(atlas.as_deref(), sprite))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Vanilla draws the hat layer unless `hat` turns it off.
+const fn default_hat() -> bool {
+    true
+}
+
+/// NBT has no booleans, so [`TextComponent::from_nbt`] hands over `hat` as a
+/// byte, which vanilla's `NbtOps` also reads as a boolean.
+fn bool_or_byte<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    value
+        .as_bool()
+        .or_else(|| value.as_i64().map(|byte| byte != 0))
+        .ok_or_else(|| serde::de::Error::custom("expected a boolean"))
+}
+
+/// Tests for the text component implementations.
+#[cfg(test)]
+mod test {
+    use crate::text::click::{ClickEvent, ClickPayload};
+    use crate::text::{
+        TextComponent,
+        color::{Color, NamedColor},
+        hover::HoverEvent,
+    };
+    use crate::version::JavaMinecraftVersion;
+    use std::borrow::Cow;
+
+    #[test]
+    fn serialize_text_component() {
+        #[allow(deprecated)]
+        let msg_comp = TextComponent::translate(
+            "multiplayer.player.joined",
+            [TextComponent::text("NAME".to_string())],
+        )
+        .color_named(NamedColor::Yellow);
+
+        let bytes = msg_comp.encode();
+
+        let expected_compound = msg_comp.0.to_translated().to_nbt_compound();
+        let mut cursor = std::io::Cursor::new(&bytes[..]);
+        let mut reader = pumpkin_nbt::deserializer::NbtReadHelperJava::new(
+            pumpkin_nbt::deserializer::NbtStreamReader(&mut cursor),
+        );
+        let decoded = pumpkin_nbt::Nbt::read_unnamed(&mut reader).unwrap();
+        assert_eq!(decoded, expected_compound.into());
+    }
+
+    /// The client expects the hover event payload to be inlined next to `action`.
+    /// Nesting it under `item`/`entity` makes the component fail to decode and
+    /// kicks the player off the server.
+    #[test]
+    fn hover_event_payload_is_inlined() {
+        let show_item = TextComponent::text("sword")
+            .hover_event(HoverEvent::ShowItem {
+                id: Cow::Borrowed("minecraft:diamond_sword"),
+                count: Some(1),
+                components: None,
+            })
+            .0
+            .to_nbt_compound();
+        let hover = show_item.get_compound("hover_event").unwrap();
+        assert_eq!(hover.get_string("action"), Some("show_item"));
+        assert_eq!(hover.get_string("id"), Some("minecraft:diamond_sword"));
+        assert_eq!(hover.get_int("count"), Some(1));
+        assert!(hover.get_compound("item").is_none());
+
+        let show_entity = TextComponent::text("pig")
+            .hover_event(HoverEvent::show_entity(
+                "6ba1a740-9a3b-4b7c-8f2c-8f5a5c1a0a11",
+                "minecraft:pig",
+                None,
+            ))
+            .0
+            .to_nbt_compound();
+        let hover = show_entity.get_compound("hover_event").unwrap();
+        assert_eq!(hover.get_string("action"), Some("show_entity"));
+        assert_eq!(hover.get_string("id"), Some("minecraft:pig"));
+        assert_eq!(
+            hover.get_string("uuid"),
+            Some("6ba1a740-9a3b-4b7c-8f2c-8f5a5c1a0a11")
+        );
+        assert!(hover.get_compound("entity").is_none());
+    }
+
+    /// `/tellraw`'s JSON keeps a `show_item` hover's components, and they go
+    /// out as NBT, as vanilla's `ItemStack` codec reads them.
+    #[test]
+    fn hover_show_item_keeps_its_components() {
+        let json = r#"{"text":"[Sword]","hover_event":{"action":"show_item","id":"minecraft:diamond_sword","components":{"minecraft:enchantments":{"minecraft:sharpness":5}}}}"#;
+        let component: TextComponent = serde_json::from_str(json).unwrap();
+        let compound = component.0.to_nbt_compound();
+        let hover = compound.get_compound("hover_event").unwrap();
+        let components = hover.get_compound("components").unwrap();
+        let enchantments = components.get_compound("minecraft:enchantments").unwrap();
+        assert!(enchantments.get("minecraft:sharpness").is_some());
+    }
+
+    /// `count` is optional for the client, so it must stay out of the payload
+    /// when it was never set.
+    #[test]
+    fn hover_show_item_omits_unset_count() {
+        let compound = TextComponent::text("sword")
+            .hover_event(HoverEvent::ShowItem {
+                id: Cow::Borrowed("minecraft:diamond_sword"),
+                count: None,
+                components: None,
+            })
+            .0
+            .to_nbt_compound();
+        let hover = compound.get_compound("hover_event").unwrap();
+        assert!(hover.get_int("count").is_none());
+    }
+
+    #[test]
+    fn click_event_uses_legacy_value_before_1_21_5() {
+        let compound = TextComponent::text("link")
+            .click_event(ClickEvent::OpenUrl {
+                url: Cow::Borrowed("https://example.com"),
+            })
+            .0
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_4);
+        let click = compound.get_compound("clickEvent").unwrap();
+        assert_eq!(click.get_string("action"), Some("open_url"));
+        assert_eq!(click.get_string("value"), Some("https://example.com"));
+        assert!(click.get_string("url").is_none());
+
+        let suggest = TextComponent::text("name")
+            .click_event(ClickEvent::SuggestCommand {
+                command: Cow::Borrowed("/tell name"),
+            })
+            .0
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_4);
+        let click = suggest.get_compound("clickEvent").unwrap();
+        assert_eq!(click.get_string("command"), None);
+        assert_eq!(click.get_string("value"), Some("/tell name"));
+    }
+
+    #[test]
+    fn click_event_uses_modern_keys_from_1_21_5() {
+        let compound = TextComponent::text("link")
+            .click_event(ClickEvent::OpenUrl {
+                url: Cow::Borrowed("https://example.com"),
+            })
+            .0
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_5);
+        let click = compound.get_compound("click_event").unwrap();
+        assert_eq!(click.get_string("url"), Some("https://example.com"));
+        assert!(click.get_string("value").is_none());
+    }
+
+    #[test]
+    fn sign_click_actions_round_trip_through_json_and_nbt() {
+        let show = TextComponent::text("dialog").click_event(ClickEvent::ShowDialog {
+            dialog: ClickPayload(Box::new(
+                serde_json::json!({"type":"minecraft:notice","title":"x"}),
+            )),
+        });
+        let json = serde_json::to_string(&show).unwrap();
+        let from_json: TextComponent = serde_json::from_str(&json).unwrap();
+        assert_eq!(from_json, show);
+        let nbt = show
+            .0
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        let from_nbt = TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt));
+        assert_eq!(from_nbt, show);
+
+        let custom = TextComponent::text("custom").click_event(ClickEvent::Custom {
+            id: Cow::Borrowed("example:action"),
+            payload: Some(ClickPayload(Box::new(serde_json::json!({"value": 1})))),
+        });
+        let json = serde_json::to_string(&custom).unwrap();
+        let from_json: TextComponent = serde_json::from_str(&json).unwrap();
+        assert_eq!(from_json, custom);
+        let nbt = custom
+            .0
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        let from_nbt = TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt));
+        assert_eq!(from_nbt, custom);
+    }
+
+    #[test]
+    fn null_dialog_payloads_are_rejected() {
+        let json = r#"{"text":"x","click_event":{"action":"show_dialog","dialog":null}}"#;
+        assert!(serde_json::from_str::<TextComponent>(json).is_err());
+    }
+
+    #[test]
+    fn styled_components_parse_from_nbt_without_coercing_numeric_fields() {
+        let mut styled = pumpkin_nbt::compound::NbtCompound::new();
+        styled.put_string("text", "hi".to_string());
+        styled.put_string("color", "red".to_string());
+        styled.put_bool("bold", true);
+        styled.put_bool("italic", false);
+        let mut numeric = pumpkin_nbt::compound::NbtCompound::new();
+        numeric.put_byte("count", 1);
+        assert_eq!(super::nbt_compound_to_json(&numeric)["count"], 1);
+        let component = TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(styled));
+        assert_eq!(component.0.style.color, Some(Color::Named(NamedColor::Red)));
+        assert_eq!(component.0.style.bold, Some(true));
+        assert_eq!(component.0.style.italic, Some(false));
+        assert_eq!(component.get_text(), "hi");
+    }
+
+    /// Each form of a player head that vanilla 26.3 reads goes out to a 26.3
+    /// client as the bytes vanilla writes for it, and to older ones as the name.
+    #[test]
+    fn player_sprite_reads_vanilla_json_and_writes_vanilla_nbt() {
+        // `{player:{name:"Steve"}}`, as vanilla 26.3 encodes all three.
+        let vanilla = b"\x0a\x0a\x00\x06player\x08\x00\x04name\x00\x05Steve\x00\x00";
+        for json in [
+            r#"{"type":"object","object":"player","player":{"name":"Steve"},"hat":true}"#,
+            r#"{"player":{"name":"Steve"}}"#,
+            r#"{"player":"Steve"}"#,
+        ] {
+            let head: TextComponent = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                &*head.encode_for_version(&JavaMinecraftVersion::V_26_3),
+                vanilla,
+                "{json}"
+            );
+            let old = head.to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_11);
+            assert_eq!(old.get_string("text"), Some("Steve"));
+        }
+    }
+
+    /// Score and atlas sprite components read vanilla's JSON (with or without the object
+    /// `type`), round-trip through NBT, and older clients get vanilla's sprite fallback.
+    #[test]
+    fn score_and_atlas_sprite_follow_vanilla() {
+        let score: TextComponent =
+            serde_json::from_str(r#"{"score":{"name":"@s","objective":"kills"}}"#).unwrap();
+        assert_eq!(score, TextComponent::score("@s", "kills"));
+        let nbt = score.to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        let inner = nbt.get_compound("score").unwrap();
+        assert_eq!(inner.get_string("name"), Some("@s"));
+        assert_eq!(inner.get_string("objective"), Some("kills"));
+        assert_eq!(
+            TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt)),
+            score
+        );
+        assert_eq!(score.get_text(), "");
+
+        for json in [
+            r#"{"type":"object","object":"atlas","sprite":"item/diamond"}"#,
+            r#"{"sprite":"item/diamond"}"#,
+        ] {
+            let sprite: TextComponent = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                sprite,
+                TextComponent::atlas_sprite(None, "item/diamond"),
+                "{json}"
+            );
+        }
+        let gui = TextComponent::atlas_sprite(Some("minecraft:gui".into()), "minecraft:hud/heart");
+        let nbt = gui.to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        assert_eq!(nbt.get_string("atlas"), Some("minecraft:gui"));
+        assert_eq!(nbt.get_string("sprite"), Some("minecraft:hud/heart"));
+        assert_eq!(
+            TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt)),
+            gui
+        );
+        let old = gui.to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_11);
+        assert_eq!(old.get_string("text"), Some("[hud/heart@gui]"));
+        let old = TextComponent::atlas_sprite(None, "item/diamond")
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_1_21_11);
+        assert_eq!(old.get_string("text"), Some("[item/diamond]"));
+    }
+
+    /// A head keeps its whole profile and `hat` through a plugin's `to-json` and
+    /// `from-json` and through NBT, and the profile's `id` goes out as an int array.
+    #[test]
+    fn player_sprite_keeps_its_profile_and_hat() {
+        let json = r#"{"type":"object","object":"player","player":{"name":"Steve","id":[1,2,3,4],"properties":[{"name":"textures","value":"e30="}],"texture":"entity/player/wide/steve","model":"slim"},"hat":false}"#;
+        let head: TextComponent = serde_json::from_str(json).unwrap();
+        let back: TextComponent =
+            serde_json::from_str(&serde_json::to_string(&head).unwrap()).unwrap();
+        assert_eq!(back, head);
+
+        let nbt = head.to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        assert_eq!(nbt.get_bool("hat"), Some(false));
+        let profile = nbt.get_compound("player").unwrap();
+        assert_eq!(profile.get_int_array("id"), Some(&[1, 2, 3, 4][..]));
+        assert_eq!(profile.get_list("properties").map(<[_]>::len), Some(1));
+
+        // NBT has no booleans, so `hat` comes back from it as the byte 0.
+        for component in [head.clone(), TextComponent::text("a").add_child(head)] {
+            let nbt = component.to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+            let from_nbt = TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt));
+            assert_eq!(from_nbt, component);
+        }
+    }
+
+    /// Vanilla rejects these profiles too, so they never reach a client.
+    #[test]
+    fn malformed_player_profiles_are_rejected() {
+        for json in [
+            r#"{"player":5}"#,
+            r#"{"player":"abcdefghijklmnopq"}"#,
+            r#"{"player":{"name":5}}"#,
+            r#"{"player":{"name":"a b"}}"#,
+            r#"{"player":{"id":[1,2,3]}}"#,
+            r#"{"player":{"id":"00000001-0000-0002-0000-000300000004"}}"#,
+            r#"{"player":{"name":"a","properties":5}}"#,
+            r#"{"player":{"properties":{"textures":"e30="}}}"#,
+            r#"{"player":{"properties":[{"name":"textures"}]}}"#,
+            r#"{"player":{"properties":[{"name":"textures","value":"e30=","signature":5}]}}"#,
+            r#"{"player":{"texture":5}}"#,
+            r#"{"player":{"cape":"A"}}"#,
+            r#"{"player":{"elytra":"..:a"}}"#,
+            r#"{"player":{"model":"default"}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<TextComponent>(json).is_err(),
+                "{json}"
+            );
+        }
+
+        // From NBT, as a creative client sends it in an item's lore.
+        let mut profile = pumpkin_nbt::NbtCompound::new();
+        profile.put_byte("properties", 5);
+        let nbt = TextComponent::player_sprite(profile, true)
+            .to_nbt_compound_for_version(&JavaMinecraftVersion::V_26_3);
+        let from_nbt = TextComponent::from_nbt(&pumpkin_nbt::tag::NbtTag::Compound(nbt));
+        assert_eq!(from_nbt, TextComponent::empty());
+    }
+
+    /// Vanilla 26.3 takes properties up to these sizes. It counts a string in
+    /// UTF-16 units, and a map past them is one it reads but can't write back.
+    #[test]
+    fn player_profile_properties_have_vanilla_limits() {
+        let head = |properties: &str| {
+            let json = format!(r#"{{"player":{{"properties":{properties}}}}}"#);
+            serde_json::from_str::<TextComponent>(&json)
+        };
+        let list = |count: usize, name: usize, value: usize, signature: usize| {
+            let property = format!(
+                r#"{{"name":"{}","value":"{}","signature":"{}"}}"#,
+                "😀".repeat(name / 2),
+                "v".repeat(value),
+                "s".repeat(signature)
+            );
+            format!("[{}]", vec![property; count].join(","))
+        };
+        let map = |names: usize, values: usize, name: usize, value: usize| {
+            let values = vec![format!(r#""{}""#, "v".repeat(value)); values].join(",");
+            let names: Vec<_> = (0..names)
+                .map(|i| format!(r#""{i:n>name$}":[{values}]"#))
+                .collect();
+            format!("{{{}}}", names.join(","))
+        };
+        assert!(head(&list(16, 64, 32767, 1024)).is_ok());
+        assert!(head(&map(16, 1, 64, 32767)).is_ok());
+        for (form, over) in [
+            ("17 properties", list(17, 64, 32767, 1024)),
+            ("name", list(16, 66, 32767, 1024)),
+            ("value", list(16, 64, 32768, 1024)),
+            ("signature", list(16, 64, 32767, 1025)),
+            ("17 names", map(17, 0, 64, 32767)),
+            ("17 values", map(1, 17, 64, 32767)),
+            ("map name", map(16, 1, 65, 32767)),
+            ("map value", map(16, 1, 64, 32768)),
+        ] {
+            assert!(head(&over).is_err(), "{form}");
+        }
+
+        // Vanilla can't write a string over 65535 bytes to NBT, and "界" takes three.
+        let value = |length| format!(r#"[{{"name":"a","value":"{}"}}]"#, "界".repeat(length));
+        assert!(head(&value(21845)).is_ok());
+        assert!(head(&value(21846)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod custom_name_nbt_tests {
+    use super::TextComponent;
+    use pumpkin_nbt::tag::NbtTag;
+
+    #[test]
+    fn list_form_appends_the_rest_to_the_first() {
+        let mut first = pumpkin_nbt::compound::NbtCompound::new();
+        first.put_string("text", "A".to_string());
+        first.put_string("color", "red".to_string());
+        let tag = NbtTag::List(vec![
+            NbtTag::Compound(first),
+            NbtTag::String("B".into()),
+            NbtTag::String("C".into()),
+        ]);
+        let component = TextComponent::from_nbt(&tag);
+        assert_eq!(component.0.extra.len(), 2);
+        assert_eq!(component.get_text(), "ABC");
+    }
+
+    #[test]
+    fn translation_arguments_may_be_numbers() {
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("translate", "chat.type.text".to_string());
+        name.put(
+            "with",
+            NbtTag::List(vec![
+                NbtTag::String("Bob".into()),
+                NbtTag::Byte(1),
+                NbtTag::Short(2),
+                NbtTag::Int(3),
+                NbtTag::Long(4),
+                NbtTag::Float(5.5),
+                NbtTag::Double(6.5),
+            ]),
+        );
+        let component = TextComponent::from_nbt(&NbtTag::Compound(name));
+        let super::TextContent::Translate { with, .. } = *component.0.content else {
+            panic!("not a translation");
+        };
+        let texts: Vec<String> = with
+            .into_iter()
+            .map(|arg| super::TextComponent(arg).get_text())
+            .collect();
+        assert_eq!(texts, ["Bob", "1", "2", "3", "4", "5.5", "6.5"]);
+    }
+
+    #[test]
+    fn an_empty_list_is_not_a_component() {
+        assert!(serde_json::from_str::<TextComponent>("[]").is_err());
+    }
+
+    #[test]
+    fn every_style_flag_is_read_from_a_byte() {
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("text", "x".to_string());
+        for (flag, value) in [
+            ("bold", 1),
+            ("italic", 0),
+            ("underlined", 1),
+            ("strikethrough", 0),
+            ("obfuscated", 1),
+        ] {
+            name.put(flag, NbtTag::Byte(value));
+        }
+        let style = TextComponent::from_nbt(&NbtTag::Compound(name)).0.style;
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(style.italic, Some(false));
+        assert_eq!(style.underlined, Some(true));
+        assert_eq!(style.strikethrough, Some(false));
+        assert_eq!(style.obfuscated, Some(true));
+    }
+
+    #[test]
+    fn json_flags_take_booleans_and_numbers() {
+        let json = r#"{"text":"x","bold":true,"italic":false,"underlined":1,"strikethrough":0}"#;
+        let style = serde_json::from_str::<TextComponent>(json).unwrap().0.style;
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(style.italic, Some(false));
+        assert_eq!(style.underlined, Some(true));
+        assert_eq!(style.strikethrough, Some(false));
+    }
+
+    #[test]
+    fn json_null_flag_is_absent() {
+        let json = r#"{"text":"x","bold":null,"italic":true}"#;
+        let style = serde_json::from_str::<TextComponent>(json).unwrap().0.style;
+        assert_eq!(style.bold, None);
+        assert_eq!(style.italic, Some(true));
+    }
+
+    #[test]
+    fn empty_hover_values_stay_readable() {
+        let json = r#"{"text":"x","hover_event":{"action":"show_text","value":[]}}"#;
+        let component: TextComponent = serde_json::from_str(json).unwrap();
+        let hover = super::hover::HoverEvent::ShowText { value: Vec::new() };
+        assert_eq!(component.0.style.hover_event, Some(hover.clone()));
+
+        let tag = NbtTag::Compound(
+            TextComponent::text("x")
+                .hover_event(hover)
+                .0
+                .to_nbt_compound(),
+        );
+        let back = TextComponent::from_nbt(&tag);
+        assert!(matches!(
+            back.0.style.hover_event,
+            Some(super::hover::HoverEvent::ShowText { value }) if value.is_empty()
+        ));
+    }
+
+    #[test]
+    fn plain_string_hover_entity_name_is_text() {
+        let mut hover = pumpkin_nbt::compound::NbtCompound::new();
+        hover.put_string("action", "show_entity".to_string());
+        hover.put_string("id", "minecraft:pig".to_string());
+        hover.put_string("uuid", "6ba1a740-9a3b-4b7c-8f2c-8f5a5c1a0a11".to_string());
+        hover.put_string("name", "Piggy".to_string());
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("text", "pig".to_string());
+        name.put_compound("hover_event", hover);
+        let component = TextComponent::from_nbt(&NbtTag::Compound(name));
+        let Some(super::hover::HoverEvent::ShowEntity {
+            name: Some(name), ..
+        }) = component.0.style.hover_event
+        else {
+            panic!("no entity hover with a name");
+        };
+        assert_eq!(name.len(), 1);
+        assert_eq!(TextComponent(name[0].clone()).get_text(), "Piggy");
+    }
+
+    #[test]
+    fn a_number_is_not_a_component() {
+        assert_eq!(
+            TextComponent::from_nbt(&NbtTag::Int(7)),
+            TextComponent::empty()
+        );
+    }
+
+    #[test]
+    fn nbt_round_trips() {
+        let original = TextComponent::text("Navigator")
+            .bold()
+            .add_child(TextComponent::text("!").italic())
+            .hover_event(super::hover::HoverEvent::show_text(TextComponent::text(
+                "Tip",
+            )));
+        let tag = NbtTag::Compound(original.0.to_nbt_compound());
+        assert_eq!(TextComponent::from_nbt(&tag), original);
+    }
+
+    #[test]
+    fn json_accepts_the_short_forms_too() {
+        let component: TextComponent =
+            serde_json::from_str(r#"{"text":"A","extra":["B",["C","D"]],"bold":1}"#).unwrap();
+        assert_eq!(component.0.style.bold, Some(true));
+        assert_eq!(component.get_text(), "ABCD");
+    }
+
+    #[test]
+    fn show_item_components_are_read_from_nbt() {
+        let mut enchantments = pumpkin_nbt::compound::NbtCompound::new();
+        enchantments.put("minecraft:sharpness", NbtTag::Int(5));
+        let mut components = pumpkin_nbt::compound::NbtCompound::new();
+        components.put_compound("minecraft:enchantments", enchantments);
+        components.put("minecraft:ints", NbtTag::IntArray(vec![1, 2]));
+        components.put("minecraft:longs", NbtTag::LongArray(vec![3]));
+        components.put("minecraft:bytes", NbtTag::ByteArray(vec![4].into()));
+        let mut hover = pumpkin_nbt::compound::NbtCompound::new();
+        hover.put_string("action", "show_item".to_string());
+        hover.put_string("id", "minecraft:diamond_sword".to_string());
+        hover.put_compound("components", components);
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("text", "[Sword]".to_string());
+        name.put_compound("hover_event", hover);
+        let component = TextComponent::from_nbt(&NbtTag::Compound(name));
+        let back = component.0.to_nbt_compound();
+        let hover = back.get_compound("hover_event").unwrap();
+        let components = hover.get_compound("components").unwrap();
+        let enchantments = components.get_compound("minecraft:enchantments").unwrap();
+        assert!(enchantments.get("minecraft:sharpness").is_some());
+        for key in ["minecraft:ints", "minecraft:longs", "minecraft:bytes"] {
+            assert!(matches!(components.get(key), Some(NbtTag::List(l)) if !l.is_empty()));
+        }
+    }
+
+    #[test]
+    fn plain_string_hover_value_is_text() {
+        let mut hover = pumpkin_nbt::compound::NbtCompound::new();
+        hover.put_string("action", "show_text".to_string());
+        hover.put_string("value", "Tip".to_string());
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("text", "Navigator".to_string());
+        name.put_compound("hover_event", hover);
+        let component = TextComponent::from_nbt(&NbtTag::Compound(name));
+        assert!(component.0.style.hover_event.is_some());
+        assert_eq!(component.get_text(), "Navigator");
+    }
+
+    #[test]
+    fn plain_strings_in_extra_are_text() {
+        let mut inner = pumpkin_nbt::compound::NbtCompound::new();
+        inner.put_string("text", String::new());
+        inner.put_string("color", "red".to_string());
+        inner.put(
+            "extra",
+            NbtTag::List(vec![NbtTag::String("Navigator".into())]),
+        );
+        let mut name = pumpkin_nbt::compound::NbtCompound::new();
+        name.put_string("text", String::new());
+        name.put("italic", NbtTag::Byte(0));
+        name.put("extra", NbtTag::List(vec![NbtTag::Compound(inner)]));
+        let component = TextComponent::from_nbt(&NbtTag::Compound(name));
+        assert_eq!(component.get_text(), "Navigator");
+    }
+
+    #[test]
+    fn plain_string_tag_is_literal_text() {
+        let tag = NbtTag::String("Bob".into());
+        let component = TextComponent::from_nbt(&tag);
+        assert_eq!(component.get_text(), "Bob");
+    }
+
+    #[test]
+    fn plain_text_round_trips_as_string_tag() {
+        let tag = TextComponent::text("Bob")
+            .0
+            .to_nbt_tag_for_version(&crate::version::JavaMinecraftVersion::V_26_3);
+        assert!(matches!(tag, NbtTag::String(ref s) if &**s == "Bob"));
+    }
+}

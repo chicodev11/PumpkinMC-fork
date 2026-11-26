@@ -1,0 +1,118 @@
+interface recipe {
+    use item-stack.{item-stack};
+
+    /// Recipe category for the recipe book.
+    enum recipe-category {
+        building,
+        redstone,
+        equipment,
+        misc,
+        food,
+        blocks,
+    }
+
+    /// Represents an ingredient in a recipe.
+    variant ingredient {
+        /// A specific item (e.g. "minecraft:diamond").
+        item(string),
+        /// A tag group of items (e.g., "minecraft:logs").
+        tag(string),
+        /// One of multiple specific items.
+        one-of(list<string>),
+        /// The same item with the same components, count ignored (Paper `ExactChoice`), for
+        /// custom items built on a vanilla item. Clients show it as the plain item; the server
+        /// checks the components when crafting.
+        exact(item-stack),
+    }
+
+    /// Represents a shaped crafting recipe.
+    record shaped-recipe {
+        /// The pattern of the recipe (e.g., ["# #", " s ", "# #"]).
+        pattern: list<string>,
+        /// Mapping of characters in the pattern to ingredients.
+        key: list<tuple<string, ingredient>>,
+        /// The resulting item stack.
+        output: item-stack,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+        /// Whether to show a toast notification when the recipe is unlocked.
+        show-notification: option<bool>,
+    }
+
+    /// Represents a shapeless crafting recipe.
+    record shapeless-recipe {
+        /// The list of ingredients required.
+        ingredients: list<ingredient>,
+        /// The resulting item stack.
+        output: item-stack,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+    }
+
+    /// Represents a cooking recipe (Smelting, Blasting, Smoking, Campfire).
+    record cooking-recipe {
+        /// The ingredient to cook.
+        ingredient: ingredient,
+        /// The resulting item stack.
+        output: item-stack,
+        /// Experience points awarded.
+        experience: f32,
+        /// Cooking time in ticks.
+        cooking-time: u32,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+    }
+
+    /// Represents a stonecutter recipe (one input item, one output stack).
+    record stonecutting-recipe {
+        /// The input.
+        ingredient: ingredient,
+        /// The resulting item stack (its components are kept).
+        output: item-stack,
+        /// The recipe group (optional).
+        group: option<string>,
+    }
+
+    /// Types of cooking stations.
+    enum cooking-type {
+        smelting,
+        blasting,
+        smoking,
+        campfire,
+    }
+
+    /// Common interface for registering recipes.
+    resource recipe-manager {
+        /// Registers a shaped crafting recipe.
+        register-shaped: func(id: string, recipe: shaped-recipe);
+        
+        /// Registers a shapeless crafting recipe.
+        register-shapeless: func(id: string, recipe: shapeless-recipe);
+
+        /// Registers a cooking recipe.
+        register-cooking: func(id: string, station-type: cooking-type, recipe: cooking-recipe);
+
+        /// Registers a stonecutter recipe.
+        register-stonecutting: func(id: string, recipe: stonecutting-recipe);
+
+        /// Removes a recipe a plugin or datapack added. Returns whether it existed.
+        remove-recipe: func(id: string) -> bool;
+
+        /// Whether a recipe with this id was added by a plugin or datapack.
+        has-recipe: func(id: string) -> bool;
+
+        /// The ids of every recipe added by plugins and datapacks.
+        get-recipe-ids: func() -> list<string>;
+
+        // Registering again with the same id replaces the recipe. Changes made while the
+        // server runs reach online players at the end of the tick (recipe book, stonecutter
+        // list, furnace input hints); no restart is needed.
+    }
+}
+

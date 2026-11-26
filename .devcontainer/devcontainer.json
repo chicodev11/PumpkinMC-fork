@@ -1,0 +1,29 @@
+{
+	"name": "Pumpkin",
+	"image": "mcr.microsoft.com/devcontainers/rust:1",
+	"runArgs": [
+		"-p",
+		"19132:19132/udp"
+	],
+	"forwardPorts": [
+		25565,
+		19132
+	],
+	"portsAttributes": {
+		"25565": {
+			"label": "Minecraft (Java)"
+		},
+		"19132": {
+			"label": "Minecraft (Bedrock)"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"tamasfe.even-better-toml",
+				"eamodio.gitlens"
+			]
+		}
+	}
+}

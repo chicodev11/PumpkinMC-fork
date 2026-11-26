@@ -1,0 +1,143 @@
+interface recipe {
+    use item-stack.{item-stack};
+
+    /// Recipe category for the recipe book.
+    enum recipe-category {
+        building,
+        redstone,
+        equipment,
+        misc,
+        food,
+        blocks,
+    }
+
+    /// Represents an ingredient in a recipe.
+    variant ingredient {
+        /// A specific item (e.g. "minecraft:diamond").
+        item(string),
+        /// A tag group of items (e.g., "minecraft:logs").
+        tag(string),
+        /// One of multiple specific items.
+        one-of(list<string>),
+        /// The same item with the same components (custom data, item model ...); the count is
+        /// ignored. Paper `RecipeChoice.ExactChoice`, for plugin items that share a vanilla item.
+        exact(item-stack),
+    }
+
+    /// Represents a shaped crafting recipe.
+    record shaped-recipe {
+        /// The pattern of the recipe (e.g., ["# #", " s ", "# #"]).
+        pattern: list<string>,
+        /// Mapping of characters in the pattern to ingredients.
+        key: list<tuple<string, ingredient>>,
+        /// The resulting item stack.
+        output: item-stack,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+        /// Whether to show a toast notification when the recipe is unlocked.
+        show-notification: option<bool>,
+    }
+
+    /// Represents a shapeless crafting recipe.
+    record shapeless-recipe {
+        /// The list of ingredients required.
+        ingredients: list<ingredient>,
+        /// The resulting item stack.
+        output: item-stack,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+    }
+
+    /// Represents a cooking recipe (Smelting, Blasting, Smoking, Campfire).
+    record cooking-recipe {
+        /// The ingredient to cook.
+        ingredient: ingredient,
+        /// The resulting item stack.
+        output: item-stack,
+        /// Experience points awarded.
+        experience: f32,
+        /// Cooking time in ticks.
+        cooking-time: u32,
+        /// The recipe group (optional).
+        group: option<string>,
+        /// The recipe category in the recipe book.
+        category: option<recipe-category>,
+    }
+
+    /// A stonecutter recipe (one input, one output stack).
+    record stonecutting-recipe {
+        ingredient: ingredient,
+        /// The result (its components are kept).
+        output: item-stack,
+        group: option<string>,
+    }
+
+    /// A smithing table transform recipe (vanilla `smithing_transform`): the result copies the
+    /// base's components, then gets the output's own.
+    record smithing-recipe {
+        template: ingredient,
+        base: ingredient,
+        addition: ingredient,
+        output: item-stack,
+    }
+
+    /// A brewing stand recipe.
+    record brewing-recipe {
+        /// The bottle: `item` (with `input-potion`) or `exact`.
+        input: ingredient,
+        /// The potion the bottle must hold (`minecraft:awkward`), for an `item` input.
+        input-potion: option<string>,
+        /// The reagent: `item` or `exact`.
+        reagent: ingredient,
+        /// The full result for each bottle.
+        output: item-stack,
+    }
+
+    /// Types of cooking stations.
+    enum cooking-type {
+        smelting,
+        blasting,
+        smoking,
+        campfire,
+    }
+
+    /// Common interface for registering recipes.
+    /// The register functions return an error (an invalid pattern, an unknown item id) instead
+    /// of skipping the recipe silently.
+    resource recipe-manager {
+        /// Registers a shaped crafting recipe.
+        register-shaped: async func(id: string, recipe: shaped-recipe) -> result<_, string>;
+
+        /// Registers a shapeless crafting recipe.
+        register-shapeless: async func(id: string, recipe: shapeless-recipe) -> result<_, string>;
+
+        /// Registers a cooking recipe.
+        register-cooking: async func(id: string, station-type: cooking-type, recipe: cooking-recipe) -> result<_, string>;
+
+        /// Registers a stonecutter recipe.
+        register-stonecutting: async func(id: string, recipe: stonecutting-recipe) -> result<_, string>;
+
+        /// Registers a smithing transform recipe.
+        register-smithing: async func(id: string, recipe: smithing-recipe) -> result<_, string>;
+
+        /// Registers a brewing recipe. Tag and one-of ingredients are not supported here.
+        register-brewing: async func(id: string, recipe: brewing-recipe) -> result<_, string>;
+
+        /// Removes a recipe a plugin or datapack added. Returns whether it existed.
+        remove-recipe: func(id: string) -> bool;
+
+        /// Whether a recipe with this id was added by a plugin or datapack.
+        has-recipe: func(id: string) -> bool;
+
+        /// The ids of every recipe added by plugins and datapacks.
+        get-recipe-ids: func() -> list<string>;
+
+        // Registering again with the same id replaces the recipe. Changes reach online
+        // players at the end of the tick.
+    }
+}
+

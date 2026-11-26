@@ -1,0 +1,256 @@
+/// Provides types and utilities for displaying rich dialogs to Java Edition players.
+/// These dialogs support various layouts, body elements (text and items), 
+/// and interactive inputs (checkboxes, text fields, sliders).
+interface java-dialogs {
+    use text.{text-component};
+    use item-stack.{item-stack};
+    use common.{nbt-tree};
+
+    /// Represents the layout and button configuration of a dialog.
+    enum dialog-type {
+        /// A simple dialog with a single "OK" button.
+        notice,
+        /// A dialog with "Yes" and "No" buttons.
+        confirmation,
+        /// A scrollable list of custom buttons.
+        multi-action,
+        /// A list of buttons that open other registered dialogs.
+        dialog-list,
+        /// A dedicated menu for displaying server-related links.
+        server-links,
+    }
+
+    /// Represents an element in the main content area of a dialog.
+    variant dialog-body {
+        /// A simple text message (200 wide).
+        plain-message(text-component),
+        /// A visual item display (vanilla defaults).
+        item(item-stack),
+        /// A text message with its own width (vanilla `plain_message`).
+        message(dialog-message),
+        /// An item with an optional description and size (vanilla `item` body).
+        item-display(dialog-item),
+    }
+
+    /// Vanilla `plain_message` body.
+    record dialog-message {
+        contents: text-component,
+        /// 1-1024, default 200.
+        width: option<u32>,
+    }
+
+    /// Vanilla `item` body.
+    record dialog-item {
+        item: item-stack,
+        /// Text shown next to the item.
+        description: option<dialog-message>,
+        /// Count and durability bar (default true).
+        show-decorations: bool,
+        /// Tooltip on hover (default true).
+        show-tooltip: bool,
+        /// 1-256, default 16.
+        width: option<u32>,
+        /// 1-256, default 16.
+        height: option<u32>,
+    }
+
+    /// Represents an interactive input control in a dialog.
+    variant dialog-input {
+        /// A checkbox for true/false states.
+        %bool(dialog-input-bool),
+        /// A simple string input field.
+        %text(dialog-input-text),
+        /// A slider for numerical input within a range.
+        number-range(dialog-input-number-range),
+        /// A multiple-choice selection button.
+        single-option(dialog-input-single-option),
+    }
+
+    // Every input has a `key`: the name its value is sent under by `dynamic-custom` actions
+    // and the `$(key)` it fills in `dynamic-run-command` templates. Letters, digits and `_`;
+    // none means `input_<index>` (its position in `inputs`).
+
+    /// A checkbox input control. Its value is 1b/0b in `dynamic-custom` payloads and
+    /// `on-true`/`on-false` ("true"/"false") in command templates.
+    record dialog-input-bool {
+        key: option<string>,
+        label: text-component,
+        default-value: bool,
+        on-true: option<string>,
+        on-false: option<string>,
+    }
+
+    /// A text field input control.
+    record dialog-input-text {
+        key: option<string>,
+        label: text-component,
+        /// Not shown by vanilla clients (the text input has no placeholder); kept for older
+        /// plugins.
+        placeholder: text-component,
+        default-value: string,
+        /// 1-1024, default 200.
+        width: option<u32>,
+        /// Whether the label is drawn (default true).
+        label-visible: option<bool>,
+        /// Default 32.
+        max-length: option<u32>,
+        /// Makes the field multi-line.
+        multiline: option<dialog-multiline>,
+    }
+
+    /// Multi-line text field options.
+    record dialog-multiline {
+        max-lines: option<u32>,
+        /// 1-512 pixels.
+        height: option<u32>,
+    }
+
+    /// A numerical range slider input control. Its value is a float.
+    record dialog-input-number-range {
+        key: option<string>,
+        label: text-component,
+        min-value: f32,
+        max-value: f32,
+        initial-value: f32,
+        /// 0 or less for a continuous slider.
+        step: f32,
+        label-format: option<string>,
+        /// 1-1024, default 200.
+        width: option<u32>,
+    }
+
+    /// A multiple-choice selection input control. Its value is the chosen option's id.
+    record dialog-input-single-option {
+        key: option<string>,
+        label: text-component,
+        options: list<text-component>,
+        initial-index: u32,
+        /// 1-1024, default 200.
+        width: option<u32>,
+        label-visible: option<bool>,
+        /// The id sent for each option (same order as `options`); `option_<index>` when
+        /// missing.
+        option-ids: option<list<string>>,
+    }
+
+    /// Defines what happens after a dialog is closed.
+    enum after-action {
+        /// Vanilla `none`: the dialog stays open after a button is clicked.
+        peek,
+        /// Vanilla `close`: the dialog closes (the default).
+        pop,
+        /// Vanilla `wait_for_response`: shows a waiting screen until the server sends the next
+        /// dialog or clears it.
+        wait-for-response,
+    }
+
+    /// Represents a clickable button in a dialog.
+    record action-button {
+        text: text-component,
+        tooltip: option<text-component>,
+        width: option<u32>,
+        action: action,
+    }
+
+    /// Represents an action triggered by a button click.
+    variant action {
+        /// Opens an external URL.
+        open-url(string),
+        /// Triggers a custom server-side callback with an ID and optional payload.
+        custom-click(custom-click-action),
+        /// The button only closes the dialog (or not, see `after-action`).
+        none,
+        /// Runs a command as the player.
+        run-command(string),
+        /// Puts text into the chat box.
+        suggest-command(string),
+        /// Copies text to the clipboard.
+        copy-to-clipboard(string),
+        /// Changes the page of an open book.
+        change-page(u32),
+        /// Vanilla `dynamic/custom`: sends `id` with every input's value as a compound
+        /// (`dialog-click-action-event`'s `payload-nbt`), plus `additions`.
+        dynamic-custom(dynamic-custom-action),
+        /// Vanilla `dynamic/run_command`: runs the template as the player with each
+        /// `$(key)` replaced by that input's value.
+        dynamic-run-command(string),
+    }
+
+    /// A custom action that carries the dialog's input values.
+    record dynamic-custom-action {
+        id: string,
+        /// Extra entries merged into the payload compound.
+        additions: option<nbt-tree>,
+    }
+
+    /// Represents a custom server-side action.
+    record custom-click-action {
+        /// A unique identifier for the action (sent back to the server).
+        id: string,
+        /// Optional data sent back with the action: JSON text becomes that value, other
+        /// UTF-8 text a string, anything else a byte array.
+        payload: option<list<u8>>,
+    }
+
+    /// Represents a link displayed in a Java Edition dialog.
+    record link {
+        /// The label to display for the link.
+        label: link-label,
+        /// The URL the link points to.
+        url: string,
+    }
+
+    /// The label for a link, which can be a built-in type or custom text.
+    variant link-label {
+        /// A built-in link type with a predefined icon/label.
+        built-in(link-type),
+        /// A custom text component label.
+        custom(text-component),
+    }
+
+    /// Built-in link types recognized by the Java Edition client.
+    enum link-type {
+        bug-report,
+        community-guidelines,
+        support,
+        status,
+        feedback,
+        community,
+        website,
+        forums,
+        news,
+        announcements,
+    }
+
+    /// Represents a dialog shown to a Java Edition player.
+    record dialog {
+        /// The main title of the dialog.
+        title: text-component,
+        /// The layout type of the dialog.
+        %type: dialog-type,
+        /// A list of body elements to display in the main area.
+        body: list<dialog-body>,
+        /// A list of interactive input controls.
+        inputs: list<dialog-input>,
+        /// The buttons: a notice uses the first as its button (vanilla "OK", which only closes,
+        /// when empty), a confirmation the first two as yes/no, a multi-action all of them (a
+        /// multi-action or dialog-list without buttons is shown as a notice).
+        buttons: list<action-button>,
+        /// A list of links (primarily for server-links type).
+        links: list<link>,
+        /// What to do after the dialog is closed.
+        after-action: option<after-action>,
+        /// Whether the player can exit the dialog using the Esc key.
+        can-close-with-escape: bool,
+        /// The text shown on buttons that link to/open this dialog.
+        external-title: option<text-component>,
+        /// Whether the dialog pauses a single-player game (default true).
+        pause: option<bool>,
+        /// Button columns for multi-action and server-links (default 2).
+        columns: option<u32>,
+        /// Button width for server-links (default 150).
+        button-width: option<u32>,
+        /// The bottom button of multi-action and server-links, also run on Escape.
+        exit-action: option<action-button>,
+    }
+}

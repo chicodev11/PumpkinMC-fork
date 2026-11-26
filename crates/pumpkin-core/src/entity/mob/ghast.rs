@@ -1,0 +1,346 @@
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Weak};
+
+use pumpkin_data::damage::DamageType;
+use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tracked_data;
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
+
+use crate::entity::ai::behavior::hunting::{self, Hunt};
+use crate::entity::ai::control::ghast_move_control::GhastMoveControl;
+use crate::entity::ai::goal::random_float_around::RandomFloatAroundGoal;
+use crate::entity::ai::target_match::TargetMatch;
+use crate::entity::projectile::fireball::FireballEntity;
+use crate::entity::{
+    Entity, EntityBase,
+    ai::goal::{Controls, Goal},
+    mob::{Mob, MobEntity},
+};
+use crate::world::World;
+
+const GHAST_HUNTS: &[Hunt] = &[Hunt::new(1, TargetMatch::Type(&EntityType::PLAYER), true)
+    .matching(hunting::within_four_blocks_height)];
+
+pub struct GhastEntity {
+    pub mob_entity: MobEntity,
+    pub is_charging: AtomicBool,
+    pub explosion_power: AtomicU8,
+}
+
+impl GhastEntity {
+    pub const DEFAULT_EXPLOSION_POWER: u8 = 1;
+    pub const XP_REWARD: u32 = 5;
+    pub const FLYING_SPEED: f64 = 0.06;
+
+    pub fn new(entity: Entity) -> Arc<Self> {
+        let mut mob_entity = MobEntity::new(entity);
+        // Vanilla `GhastMoveControl(this, false, () -> false)`.
+        *mob_entity
+            .move_control
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(GhastMoveControl::new(false));
+        let ghast = Self {
+            mob_entity,
+            is_charging: AtomicBool::new(false),
+            explosion_power: AtomicU8::new(Self::DEFAULT_EXPLOSION_POWER),
+        };
+
+        let mob_arc = Arc::new(ghast);
+
+        {
+            let goal_selector = &mob_arc.mob_entity.goals_selector;
+
+            // Priority 5: Random floating around
+            goal_selector.add_goal(5, Box::new(RandomFloatAroundGoal::new(0)));
+
+            // Priority 7: Face target / movement direction
+            goal_selector.add_goal(7, Box::new(GhastLookGoal::new()));
+
+            // Priority 7: Shoot large fireballs at target
+            goal_selector.add_goal(
+                7,
+                Box::new(GhastShootFireballGoal::new(Arc::downgrade(&mob_arc))),
+            );
+
+            let target_selector = &mob_arc.mob_entity.target_selector;
+
+            // Priority 1: Target nearest player within vertical proximity
+            hunting::apply(target_selector, &mob_arc.mob_entity, GHAST_HUNTS);
+        };
+
+        mob_arc
+    }
+
+    pub fn set_charging(&self, charging: bool) {
+        self.is_charging.store(charging, Ordering::Relaxed);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.set_synced_data(tracked_data::ghast::DATA_IS_CHARGING, charging);
+    }
+
+    #[must_use]
+    pub fn is_charging(&self) -> bool {
+        self.is_charging.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn get_explosion_power(&self) -> u8 {
+        self.explosion_power.load(Ordering::Relaxed)
+    }
+
+    pub fn set_explosion_power(&self, power: u8) {
+        self.explosion_power.store(power, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn check_ghast_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+        if world.level_info.load().difficulty == pumpkin_util::Difficulty::Peaceful {
+            return false;
+        }
+        if rand::random_range(0..20) != 0 {
+            return false;
+        }
+        let state = world.get_block_state(pos);
+        state.is_air()
+    }
+}
+
+impl Mob for GhastEntity {
+    fn mob_support_quad_leash_as_holder(&self) -> bool {
+        true
+    }
+
+    fn get_mob_entity(&self) -> &MobEntity {
+        &self.mob_entity
+    }
+
+    fn on_climbable(&self) -> bool {
+        false
+    }
+
+    fn get_mob_gravity(&self) -> f64 {
+        0.0 // Ghasts fly, no gravity applied in standard travel
+    }
+
+    fn get_mob_y_velocity_drag(&self) -> Option<f64> {
+        Some(0.95)
+    }
+
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if self.is_charging() {
+            entity.set_synced_data(tracked_data::ghast::DATA_IS_CHARGING, true);
+        }
+    }
+
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        let power = self.get_explosion_power();
+        nbt.put_byte("ExplosionPower", i8::try_from(power).unwrap_or(1));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        if let Some(power) = nbt.get_byte("ExplosionPower") {
+            self.set_explosion_power(u8::try_from(power).unwrap_or(Self::DEFAULT_EXPLOSION_POWER));
+        }
+    }
+
+    fn modify_incoming_damage(&self, amount: f32, damage_type: DamageType) -> f32 {
+        if damage_type.id == DamageType::FIREBALL.id {
+            1000.0
+        } else {
+            amount
+        }
+    }
+
+    fn xp_reward(&self) -> u32 {
+        Self::XP_REWARD
+    }
+}
+
+/// Vanilla `Ghast.faceMovementDirection`: face the target within 64 blocks, else the way it drifts.
+pub fn face_movement_direction(mob: &dyn Mob) {
+    let mob_entity = mob.get_mob_entity();
+    let entity = &mob_entity.living_entity.entity;
+    let yaw = if let Some(target) = mob_entity.get_target() {
+        let mob_pos = entity.pos.load();
+        let target_pos = target.get_entity().pos.load();
+        if mob_pos.squared_distance_to_vec(&target_pos) >= 4096.0 {
+            return;
+        }
+        (-f64::atan2(target_pos.x - mob_pos.x, target_pos.z - mob_pos.z).to_degrees()) as f32
+    } else {
+        let velocity = entity.velocity.load();
+        (-f64::atan2(velocity.x, velocity.z).to_degrees()) as f32
+    };
+    entity.yaw.store(yaw);
+    entity.body_yaw.store(yaw);
+    entity.head_yaw.store(yaw);
+}
+
+pub struct GhastLookGoal {
+    goal_control: Controls,
+}
+
+impl Default for GhastLookGoal {
+    fn default() -> Self {
+        Self {
+            goal_control: Controls::LOOK,
+        }
+    }
+}
+
+impl GhastLookGoal {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Goal for GhastLookGoal {
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        true
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        face_movement_direction(mob);
+    }
+
+    fn controls(&self) -> Controls {
+        self.goal_control
+    }
+}
+
+pub struct GhastShootFireballGoal {
+    ghast: Weak<GhastEntity>,
+    charge_time: i32,
+}
+
+impl GhastShootFireballGoal {
+    #[must_use]
+    pub const fn new(ghast: Weak<GhastEntity>) -> Self {
+        Self {
+            ghast,
+            charge_time: 0,
+        }
+    }
+}
+
+impl Goal for GhastShootFireballGoal {
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(ghast) = self.ghast.upgrade() else {
+            return false;
+        };
+        let target = ghast.mob_entity.get_target();
+        target.is_some_and(|t| t.get_entity().is_alive())
+    }
+
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(ghast) = self.ghast.upgrade() else {
+            return false;
+        };
+        let target = ghast.mob_entity.get_target();
+        target.is_some_and(|t| t.get_entity().is_alive())
+    }
+
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.charge_time = 0;
+    }
+
+    fn stop(&mut self, _mob: &dyn Mob) {
+        if let Some(ghast) = self.ghast.upgrade() {
+            ghast.set_charging(false);
+        }
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(ghast) = self.ghast.upgrade() else {
+            return;
+        };
+
+        let target_opt = ghast.mob_entity.get_target();
+        let Some(target) = target_opt else {
+            return;
+        };
+
+        let entity = &ghast.mob_entity.living_entity.entity;
+        let ghast_pos = entity.pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let dist_sq = ghast_pos.squared_distance_to_vec(&target_pos);
+
+        if dist_sq < 4096.0 {
+            let world = entity.world.load();
+            self.charge_time += 1;
+
+            if self.charge_time == 10 {
+                world.play_sound_fine(
+                    Sound::EntityGhastWarn,
+                    SoundCategory::Hostile,
+                    &ghast_pos,
+                    5.0,
+                    1.0,
+                );
+            }
+
+            if self.charge_time == 20 {
+                world.play_sound_fine(
+                    Sound::EntityGhastShoot,
+                    SoundCategory::Hostile,
+                    &ghast_pos,
+                    5.0,
+                    1.0,
+                );
+
+                let yaw_rad = f64::from(entity.yaw.load()).to_radians();
+                let pitch_rad = f64::from(entity.pitch.load()).to_radians();
+                let view_x = -pitch_rad.cos() * yaw_rad.sin();
+                let view_z = pitch_rad.cos() * yaw_rad.cos();
+
+                let spawn_pos = Vector3::new(
+                    ghast_pos.x + view_x * 4.0,
+                    ghast_pos.y + 2.5,
+                    ghast_pos.z + view_z * 4.0,
+                );
+
+                let target_y = target_pos.y + target.get_entity().get_eye_height() * 0.5;
+                let dir_x = target_pos.x - spawn_pos.x;
+                let dir_y = target_y - spawn_pos.y;
+                let dir_z = target_pos.z - spawn_pos.z;
+                let direction = Vector3::new(dir_x, dir_y, dir_z);
+
+                let fireball_base = Entity::from_uuid(
+                    uuid::Uuid::new_v4(),
+                    world.clone(),
+                    spawn_pos,
+                    &EntityType::FIREBALL,
+                );
+
+                let fireball = FireballEntity::new_shot(fireball_base, entity, direction);
+                fireball
+                    .explosion_power
+                    .store(f32::from(ghast.get_explosion_power()), Ordering::Relaxed);
+
+                world.spawn_entity_non_save(Arc::new(fireball));
+                self.charge_time = -40;
+            }
+        } else if self.charge_time > 0 {
+            self.charge_time -= 1;
+        }
+
+        ghast.set_charging(self.charge_time > 10);
+    }
+
+    fn controls(&self) -> Controls {
+        Controls::empty()
+    }
+}

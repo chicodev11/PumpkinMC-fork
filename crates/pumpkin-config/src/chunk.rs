@@ -1,0 +1,67 @@
+use std::str;
+
+use serde::{Deserialize, Serialize};
+
+/// Configuration for chunk storage format.
+///
+/// Supports `Anvil` (`.mca`), `Linear` (`.linear`), and `Pump` (`.pump`). The default is
+/// vanilla's Anvil with zlib; the world is converted on startup when the format changes.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(tag = "type")]
+pub enum ChunkConfig {
+    /// Standard Anvil chunk storage, readable by vanilla and external tools.
+    #[serde(rename = "anvil")]
+    Anvil(AnvilChunkConfig),
+    /// Linear chunk storage format.
+    #[serde(rename = "linear")]
+    Linear,
+    /// Pumpkin's own world format: slightly faster reads, larger files, Pumpkin only.
+    #[serde(rename = "pump")]
+    Pump,
+}
+
+impl Default for ChunkConfig {
+    fn default() -> Self {
+        Self::Anvil(AnvilChunkConfig::default())
+    }
+}
+
+/// Configuration for Anvil chunk storage.
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(default)]
+pub struct AnvilChunkConfig {
+    /// Compression settings for chunk data.
+    pub compression: ChunkCompression,
+}
+
+/// Compression settings for chunk data.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ChunkCompression {
+    /// Compression algorithm to use.
+    pub algorithm: Compression,
+    /// Compression level (algorithm-specific).
+    pub level: u32,
+}
+
+impl Default for ChunkCompression {
+    fn default() -> Self {
+        // Vanilla `region-file-compression=deflate` (zlib) at the default deflate level.
+        Self {
+            algorithm: Compression::ZLib,
+            level: 6,
+        }
+    }
+}
+
+/// Compression algorithm used for chunk data storage.
+#[derive(Deserialize, Serialize, Clone, Copy)]
+pub enum Compression {
+    /// `GZip` Compression.
+    GZip,
+    /// `ZLib` Compression.
+    ZLib,
+    /// LZ4 Compression (since 24w04a).
+    LZ4,
+    /// Custom compression algorithm (since 24w05a).
+    Custom,
+}

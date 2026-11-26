@@ -1,0 +1,71 @@
+name: Build binaries
+
+# Manual build of server binaries for Linux and macOS (Windows is built locally).
+# Start it by pushing to the `build` branch (`git push origin dev:build`), or, once this file is
+# on the default branch, from the Actions tab or `gh workflow run build.yml --ref dev`.
+on:
+  push:
+    branches:
+      - build
+  workflow_dispatch:
+    inputs:
+      release_lto:
+        description: LTO mode (off is fastest, fat is what release.yml ships)
+        required: false
+        default: thin
+        type: choice
+        options:
+          - "off"
+          - thin
+          - fat
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: pumpkin-X64-Linux
+          - name: Linux ARM64
+            os: ubuntu-26.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: pumpkin-ARM64-Linux
+          - name: macOS ARM64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            asset: pumpkin-ARM64-macOS
+          - name: macOS x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            asset: pumpkin-X64-macOS
+    env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ inputs.release_lto || 'thin' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: rustup update stable && rustup default stable && rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --bin pumpkin --target ${{ matrix.target }}
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/pumpkin" "dist/${{ matrix.asset }}"
+          chmod +x "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          compression-level: 9
+          path: dist/${{ matrix.asset }}
+          retention-days: 14

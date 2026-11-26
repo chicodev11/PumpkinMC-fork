@@ -1,0 +1,635 @@
+use crate::{
+    BlockState, BlockStateId,
+    tag::{RegistryKey, Tag, Taggable},
+};
+use pumpkin_util::{
+    loot_table::LootTable,
+    math::{experience::Experience, position::BlockPos, vector3::Vector3},
+    random::hash_block_pos,
+    resource_location::{FromResourceLocation, ResourceLocation, ToResourceLocation},
+};
+use std::hash::{Hash, Hasher};
+
+/// Represents the static definition of a Minecraft block type.
+///
+/// This struct contains the base properties shared by all instances of a block
+/// Data-driven attributes like `hardness` and `blast_resistance` are defined here,
+/// while specific orientations or variations are stored in the associated `BlockState`.
+#[derive(Debug, Clone)]
+pub struct Block {
+    /// The numeric ID used for internal registry mapping.
+    pub id: BlockId,
+    /// The unique namespaced ID (e.g., "`diamond_ore`").
+    pub name: &'static str,
+    /// How hard the block is to break. A value of -1.0 indicates an unbreakable block (e.g., Bedrock).
+    pub hardness: f32,
+    /// The block's resistance to explosions.
+    pub blast_resistance: f32,
+    pub map_color: u8,
+    /// The friction coefficient. Default is 0.6; Ice is 0.98.
+    pub slipperiness: f32,
+    /// How much this block affects the speed of an entity walking on it (e.g., Soul Sand).
+    pub velocity_multiplier: f32,
+    /// How much this block affects an entity's jump height (e.g., Honey Blocks).
+    pub jump_velocity_multiplier: f32,
+    /// Vertical bounce restitution (`Block.getBounceRestitution`).
+    pub bounce_restitution: f32,
+    /// Fraction of fall distance reduced on landing (`Block.getFallDistanceReduction`).
+    pub fall_distance_reduction: f32,
+    /// The ID of the item form of this block, used for inventory and drops.
+    pub item_id: u16,
+    /// The initial state of the block when placed without extra data.
+    pub default_state: &'static BlockState,
+    /// A list of all possible valid states (properties like rotation, waterlogged, etc.) for this block.
+    pub states: &'static [BlockState],
+    /// Fire behavior settings. If `None`, the block is not flammable.
+    pub flammable: Option<Flammable>,
+    /// Defines the amount of XP dropped when the block is mined (e.g., Coal or Diamond).
+    pub experience: Option<Experience>,
+    /// Loot table identifier, `None` when the block has no loot table.
+    pub loot_table: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnFloorPredicate {
+    Default,
+    Never,
+    Always,
+    OcelotOrParrot,
+    PolarBear,
+    FireImmune,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuffocationPredicate {
+    Default,
+    Never,
+    Always,
+}
+
+/// Helper struct to ensure the validity of BlockIds parsed from external sources.
+/// Every [`BlockId`] is guaranteed to correspond to a valid [`Block`].
+///
+/// Also enables [`Block`]-type pattern matching, even in const contexts:
+/// ```rs
+/// const fn to_waxed(block: &'static Block) -> Option<&'static Block> {
+///     match block.id {
+///         BlockId::COPPER_BLOCK => Some(Block::WAXED_COPPER_BLOCK),
+///         //...
+///         _ => None
+///     }
+/// }
+/// ```
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct BlockId(pub(crate) u16);
+
+impl PartialEq<BlockId> for Block {
+    fn eq(&self, other: &BlockId) -> bool {
+        self.id == *other
+    }
+}
+
+impl PartialEq<Block> for BlockId {
+    fn eq(&self, other: &Block) -> bool {
+        *self == other.id
+    }
+}
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Block {}
+
+impl Hash for Block {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Taggable for Block {
+    #[inline]
+    fn tag_key() -> RegistryKey {
+        RegistryKey::Block
+    }
+
+    #[inline]
+    fn registry_key(&self) -> &str {
+        self.name
+    }
+
+    #[inline]
+    fn registry_id(&self) -> u16 {
+        self.id.as_u16()
+    }
+
+    fn is_tagged_with(&self, tag: &str) -> Option<bool> {
+        if let Some(info) = crate::custom_block::block_info(self.id) {
+            return Some(info.has_tag_name(tag));
+        }
+        let tag = tag.strip_prefix('#').unwrap_or(tag);
+        let items = crate::tag::get_tag_ids(RegistryKey::Block, tag).or_else(|| {
+            if tag.contains(':') {
+                tag.strip_prefix("minecraft:")
+                    .and_then(|stripped| crate::tag::get_tag_ids(RegistryKey::Block, stripped))
+            } else {
+                crate::tag::get_tag_ids(RegistryKey::Block, &format!("minecraft:{tag}"))
+            }
+        })?;
+        Some(items.contains(&self.id.as_u16()))
+    }
+
+    #[inline]
+    fn has_tag(&self, tag: &'static Tag) -> bool {
+        if crate::custom_block::is_custom_block(self.id) {
+            return crate::custom_block::block_info(self.id)
+                .is_some_and(|info| custom_has_tag(info, tag));
+        }
+        tag.1.contains(&self.id.as_u16())
+    }
+}
+
+/// Whether a custom block lists `tag`. Tags are matched by name (their value lists), so a custom
+/// block can join any vanilla or datapack tag.
+fn custom_has_tag(info: &crate::custom_block::CustomBlockInfo, tag: &Tag) -> bool {
+    let tags = crate::tag::get_latest_map(RegistryKey::Block);
+    info.tags.iter().any(|name| {
+        tags.get(*name)
+            .or_else(|| tags.get(name.strip_prefix("minecraft:").unwrap_or(name)))
+            .is_some_and(|candidate| candidate.0 == tag.0)
+    })
+}
+
+impl Block {
+    /// The registry name: `minecraft:stone` for vanilla blocks, `namespace:path` for custom ones.
+    #[must_use]
+    pub fn registry_name(&self) -> String {
+        if self.name.contains(':') {
+            self.name.to_string()
+        } else {
+            format!("minecraft:{}", self.name)
+        }
+    }
+
+    /// Whether this is a custom (plugin or placeholder) block.
+    #[inline]
+    #[must_use]
+    pub const fn is_custom(&self) -> bool {
+        crate::custom_block::is_custom_block(self.id)
+    }
+}
+
+impl ToResourceLocation for &'static Block {
+    fn to_resource_location(&self) -> ResourceLocation {
+        self.registry_name()
+    }
+}
+
+impl FromResourceLocation for &'static Block {
+    fn from_resource_location(resource_location: &ResourceLocation) -> Option<Self> {
+        Block::from_registry_key(
+            resource_location
+                .strip_prefix("minecraft:")
+                .unwrap_or(resource_location),
+        )
+    }
+}
+
+impl Block {
+    #[must_use]
+    pub const fn get_speed_factor(&self) -> f32 {
+        self.velocity_multiplier
+    }
+
+    #[must_use]
+    pub const fn get_jump_velocity_multiplier(&self) -> f32 {
+        self.jump_velocity_multiplier
+    }
+
+    pub(crate) fn shape_offset_delta(&self, pos: &BlockPos) -> Vector3<f64> {
+        let Some(shape_offset) = self.shape_offset() else {
+            return Vector3::new(0.0, 0.0, 0.0);
+        };
+
+        let seed = hash_block_pos(pos.0.x, 0, pos.0.z) as u64;
+        let max_horizontal = f64::from(shape_offset.max_horizontal);
+        let x = (f64::from((seed & 15) as f32 / 15.0) - 0.5) * 0.5;
+        let x = x.clamp(-max_horizontal, max_horizontal);
+        let z = (f64::from(((seed >> 8) & 15) as f32 / 15.0) - 0.5) * 0.5;
+        let z = z.clamp(-max_horizontal, max_horizontal);
+        let y = match shape_offset.offset_type {
+            ShapeOffsetType::Xz => 0.0,
+            ShapeOffsetType::Xyz => {
+                (f64::from(((seed >> 4) & 15) as f32 / 15.0) - 1.0)
+                    * f64::from(shape_offset.max_vertical)
+            }
+        };
+
+        // Extracted shapes are sampled at BlockPos::ZERO, where vanilla uses the
+        // negative horizontal limits and, for XYZ offsets, the negative vertical
+        // limit. Return only the delta from that sample.
+        Vector3::new(
+            x + max_horizontal,
+            y + shape_offset.offset_type.origin_y(shape_offset.max_vertical),
+            z + max_horizontal,
+        )
+    }
+
+    #[must_use]
+    pub fn is_waterlogged(&self, id: BlockStateId) -> bool {
+        id.is_waterlogged()
+    }
+
+    #[must_use]
+    pub fn is_waterloggable(&self) -> bool {
+        self.properties(self.default_state.id).is_some_and(|props| {
+            props
+                .to_props()
+                .iter()
+                .any(|p| p.key() == crate::PropertyKey::Waterlogged)
+        })
+    }
+
+    /// Returns a new [`BlockStateId`] for the given [`BlockStateId`] with the
+    /// `waterlogged` property forced to `value`. If the state already has
+    /// waterlogged set to `value` or the  block does not expose a `waterlogged`
+    /// property then `None` is returned.
+    #[must_use]
+    pub fn set_waterlogged(&self, id: BlockStateId, value: bool) -> Option<BlockStateId> {
+        self.properties(id).and_then(|props| {
+            let mut props = props.to_props();
+            let waterlogged = props.iter_mut().find_map(|p| match p {
+                crate::Property::Waterlogged(w) => Some(w),
+                _ => None,
+            })?;
+            if value == *waterlogged {
+                return None;
+            }
+
+            *waterlogged = value;
+            Some(self.from_properties(&props).to_state_id(self))
+        })
+    }
+
+    #[must_use]
+    pub fn state_from_properties(
+        &'static self,
+        properties: &[crate::Property],
+    ) -> Option<&'static BlockState> {
+        self.states.iter().find(|state| {
+            let Some(state_properties) = self.properties(state.id) else {
+                return properties.is_empty();
+            };
+            let state_properties = state_properties.to_props();
+
+            state_properties.len() == properties.len()
+                && properties.iter().all(|prop| {
+                    state_properties
+                        .iter()
+                        .any(|state_prop| state_prop.matches_property(*prop))
+                })
+        })
+    }
+
+    /// Parses a single `(key, value)` state property pair against this block's valid states.
+    pub fn parse_property(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<crate::Property, PropertyLookupError> {
+        let default_props = self
+            .properties(self.default_state.id)
+            .ok_or(PropertyLookupError::UnknownProperty)?
+            .to_props();
+        let idx = default_props
+            .iter()
+            .position(|p| p.key().to_str() == key)
+            .ok_or(PropertyLookupError::UnknownProperty)?;
+        self.states
+            .iter()
+            .find_map(|state| {
+                let props = self.properties(state.id)?.to_props();
+                let prop = *props.get(idx)?;
+                (prop.value_str() == value).then_some(prop)
+            })
+            .ok_or(PropertyLookupError::InvalidValue)
+    }
+
+    /// Returns whether this block defines a state property with `key`.
+    #[must_use]
+    pub fn has_property(&self, key: &str) -> bool {
+        self.properties(self.default_state.id)
+            .is_some_and(|props| props.to_props().iter().any(|p| p.key().to_str() == key))
+    }
+
+    /// Copies each property in `overrides` onto `base_state_id` when it belongs to this block.
+    #[must_use]
+    pub fn apply_properties(
+        &self,
+        base_state_id: BlockStateId,
+        overrides: &[crate::Property],
+    ) -> BlockStateId {
+        if overrides.is_empty() || Self::from_state_id(base_state_id).id != self.id {
+            return base_state_id;
+        }
+        let Some(state_props) = self.properties(base_state_id) else {
+            return base_state_id;
+        };
+        let mut props = state_props.to_props();
+        for &defined in overrides {
+            if let Some(slot) = props.iter_mut().find(|p| p.key() == defined.key()) {
+                *slot = defined;
+            }
+        }
+        self.from_properties(&props).to_state_id(self)
+    }
+
+    /// Returns whether this block is solid (based on default state)
+    #[must_use]
+    pub const fn is_solid(&self) -> bool {
+        self.default_state.is_solid()
+    }
+
+    /// Returns whether this block is air (based on default state)
+    #[must_use]
+    pub const fn is_air(&self) -> bool {
+        self.default_state.is_air()
+    }
+
+    #[must_use]
+    pub fn mirror(
+        &self,
+        id: BlockStateId,
+        mirror: crate::block_rotation::Mirror,
+    ) -> &'static BlockState {
+        if mirror == crate::block_rotation::Mirror::None || self.states.len() <= 1 {
+            return BlockState::from_id(id);
+        }
+        if let Some(props) = self.properties(id) {
+            let props_vec = props.to_props();
+            let transformed = crate::block_rotation::transform_block_properties(
+                self.name,
+                &props_vec,
+                crate::block_rotation::Rotation::None,
+                mirror,
+            );
+            let new_props = self.from_properties(&transformed);
+            let new_state_id = new_props.to_state_id(self);
+            BlockState::from_id(new_state_id)
+        } else {
+            BlockState::from_id(id)
+        }
+    }
+
+    #[must_use]
+    pub fn rotate(
+        &self,
+        id: BlockStateId,
+        rotation: crate::block_rotation::Rotation,
+    ) -> &'static BlockState {
+        if rotation == crate::block_rotation::Rotation::None || self.states.len() <= 1 {
+            return BlockState::from_id(id);
+        }
+        if let Some(props) = self.properties(id) {
+            let props_vec = props.to_props();
+            let transformed = crate::block_rotation::transform_block_properties(
+                self.name,
+                &props_vec,
+                rotation,
+                crate::block_rotation::Mirror::None,
+            );
+            let new_props = self.from_properties(&transformed);
+            let new_state_id = new_props.to_state_id(self);
+            BlockState::from_id(new_state_id)
+        } else {
+            BlockState::from_id(id)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyLookupError {
+    UnknownProperty,
+    InvalidValue,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ShapeOffsetType {
+    Xz,
+    Xyz,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ShapeOffset {
+    pub offset_type: ShapeOffsetType,
+    pub max_horizontal: f32,
+    pub max_vertical: f32,
+}
+
+impl ShapeOffsetType {
+    fn origin_y(self, max_vertical: f32) -> f64 {
+        match self {
+            Self::Xz => 0.0,
+            Self::Xyz => f64::from(max_vertical),
+        }
+    }
+}
+
+impl BlockId {
+    // depends on generated impl:
+    // pub(crate) const BLOCK_COUNT: u16;
+
+    /// The number of vanilla blocks. Custom (plugin) blocks follow them, see
+    /// [`crate::custom_block::total_block_count`].
+    pub const COUNT: u16 = Self::BLOCK_COUNT;
+
+    // SAFETY: There must never be a BlockId that is neither a vanilla block
+    // (self.0 < BLOCK_COUNT) nor a published custom block.
+
+    /// A vanilla or registered custom block id.
+    #[inline]
+    #[must_use]
+    pub fn new(inner: u16) -> Option<Self> {
+        if inner < Self::BLOCK_COUNT || crate::custom_block::is_valid_custom_block(inner) {
+            return Some(Self(inner));
+        }
+        None
+    }
+
+    /// A vanilla block id; usable in constants.
+    #[inline]
+    #[must_use]
+    pub const fn new_vanilla(inner: u16) -> Option<Self> {
+        if inner < Self::BLOCK_COUNT {
+            return Some(Self(inner));
+        }
+        None
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn new_or_air(inner: u16) -> Self {
+        Self::new(inner).unwrap_or(Self::AIR)
+    }
+
+    /// A vanilla id, or air; usable in constants.
+    #[inline]
+    #[must_use]
+    pub const fn new_vanilla_or_air(inner: u16) -> Self {
+        if inner < Self::BLOCK_COUNT {
+            return Self(inner);
+        }
+        Self::AIR
+    }
+
+    /// Whether this is a custom (plugin or placeholder) block.
+    #[inline]
+    #[must_use]
+    pub const fn is_custom(self) -> bool {
+        crate::custom_block::is_custom_block(self)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn to_block(self) -> &'static Block {
+        Block::from_id(self)
+    }
+
+    #[inline(always)]
+    #[must_use]
+    pub const fn as_u16(self) -> u16 {
+        self.0
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn has_tag(self, tag: Tag) -> bool {
+        if let Some(info) = crate::custom_block::block_info(self) {
+            return custom_has_tag(info, &tag);
+        }
+        tag.1.contains(&self.0)
+    }
+}
+
+impl From<BlockId> for u16 {
+    #[inline]
+    fn from(value: BlockId) -> Self {
+        value.as_u16()
+    }
+}
+
+impl From<Block> for BlockId {
+    #[inline]
+    fn from(value: Block) -> Self {
+        value.id
+    }
+}
+
+impl From<&Block> for BlockId {
+    #[inline]
+    fn from(value: &Block) -> Self {
+        value.id
+    }
+}
+
+impl Default for BlockId {
+    #[inline]
+    fn default() -> Self {
+        Self::AIR
+    }
+}
+
+impl std::fmt::Display for BlockId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BlockId({} = \"{}\")",
+            self.0,
+            Block::from_id(*self).name
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Flammable {
+    pub spread_chance: u8,
+    pub burn_chance: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Block, BlockId, ShapeOffsetType};
+    use pumpkin_util::math::position::BlockPos;
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn shape_offset_registry_matches_vanilla_26_2() {
+        let mut xz = 0;
+        let mut xyz = 0;
+
+        for raw_id in 0..BlockId::BLOCK_COUNT {
+            match Block::from_id(BlockId::new(raw_id).unwrap())
+                .shape_offset()
+                .map(|offset| offset.offset_type)
+            {
+                Some(ShapeOffsetType::Xz) => xz += 1,
+                Some(ShapeOffsetType::Xyz) => xyz += 1,
+                None => {}
+            }
+        }
+
+        assert_eq!(xz, 34);
+        assert_eq!(xyz, 5);
+    }
+
+    #[test]
+    fn shape_offset_limits_match_vanilla_26_2() {
+        let bamboo = Block::BAMBOO.shape_offset().unwrap();
+        assert_eq!(bamboo.max_horizontal, 0.25);
+        assert_eq!(bamboo.max_vertical, 0.2);
+
+        let pointed_dripstone = Block::POINTED_DRIPSTONE.shape_offset().unwrap();
+        assert_eq!(pointed_dripstone.max_horizontal, 0.125);
+
+        let small_dripleaf = Block::SMALL_DRIPLEAF.shape_offset().unwrap();
+        assert_eq!(small_dripleaf.max_vertical, 0.1);
+    }
+
+    #[test]
+    fn shape_offset_delta_matches_vanilla_coordinate_hash() {
+        let origin = BlockPos::new(0, 64, 0);
+        let positive_extreme = BlockPos::new(-18, 64, -7);
+
+        let origin_delta = Block::BAMBOO.shape_offset_delta(&origin);
+        assert_eq!(origin_delta.x, 0.0);
+        assert_eq!(origin_delta.y, 0.0);
+        assert_eq!(origin_delta.z, 0.0);
+
+        let bamboo_delta = Block::BAMBOO.shape_offset_delta(&positive_extreme);
+        assert_eq!(bamboo_delta.x, 0.5);
+        assert_eq!(bamboo_delta.y, 0.0);
+        assert_eq!(bamboo_delta.z, 0.5);
+
+        let speleothem_delta = Block::POINTED_DRIPSTONE.shape_offset_delta(&positive_extreme);
+        assert_eq!(speleothem_delta.x, 0.25);
+        assert_eq!(speleothem_delta.y, 0.0);
+        assert_eq!(speleothem_delta.z, 0.25);
+        assert_eq!(
+            Block::SULFUR_SPIKE.shape_offset_delta(&positive_extreme),
+            speleothem_delta
+        );
+
+        let xyz_delta = Block::SHORT_GRASS.shape_offset_delta(&positive_extreme);
+        assert_eq!(xyz_delta.x, 0.5);
+        assert_close(xyz_delta.y, 0.08);
+        assert_eq!(xyz_delta.z, 0.5);
+
+        assert_eq!(Block::STONE.shape_offset_delta(&positive_extreme).x, 0.0);
+    }
+}

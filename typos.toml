@@ -1,0 +1,20 @@
+[files]
+extend-exclude = ["assets/", "crates/pumpkin-data/src/generated"]
+
+[default.extend-words]
+handled = "handled"
+received = "received"
+ba = "ba"
+fo = "fo"
+undescore = "undescore"
+replaceables = "replaceables"
+convertable = "convertable"
+# Chunk-loss message
+Welp = "Welp"
+
+[default.extend-identifiers]
+# Vanilla method names
+areMergable = "areMergable"
+isMergable = "isMergable"
+combineWithNeigbour = "combineWithNeigbour"
+matchesStickyCritera = "matchesStickyCritera"

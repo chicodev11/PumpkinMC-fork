@@ -1,0 +1,181 @@
+#![allow(clippy::panic)]
+
+use std::{
+    collections::BTreeMap,
+    marker::PhantomData,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
+};
+
+pub use crate::wit::pumpkin::plugin::event::{
+    BedrockClientboundPacket, BedrockServerboundPacket, ClientboundPacket, Event, EventPriority,
+    InteractAction, JavaClientboundPacket, JavaServerboundPacket, ServerboundPacket,
+};
+use crate::{Context, Result, Server, wit::pumpkin::plugin::event::EventType};
+
+/// Block events.
+pub mod block;
+/// Dialog events.
+pub mod dialog;
+/// Enchantment events.
+pub mod enchantment;
+/// Entity events.
+pub mod entity;
+/// Hanging entity events.
+pub mod hanging;
+/// Inventory events.
+pub mod inventory;
+/// Network packet events.
+pub mod packet;
+/// Player events.
+pub mod player;
+/// Raid events.
+pub mod raid;
+/// Server lifecycle events.
+pub mod server;
+/// Vehicle events.
+pub mod vehicle;
+/// World events.
+pub mod world;
+
+pub use block::*;
+pub use dialog::*;
+pub use enchantment::*;
+pub use entity::*;
+pub use hanging::*;
+pub use inventory::*;
+pub use packet::*;
+pub use player::*;
+pub use raid::*;
+pub use server::*;
+pub use vehicle::*;
+pub use world::*;
+
+pub(crate) static NEXT_HANDLER_ID: AtomicU32 = AtomicU32::new(0);
+pub(crate) static EVENT_HANDLERS: Mutex<BTreeMap<u32, Arc<dyn ErasedEventHandler>>> =
+    Mutex::new(BTreeMap::new());
+
+/// Connects an event marker type to its WIT-generated data type and [`EventType`] discriminant.
+///
+/// Implement this trait for a unit struct to define a new event. The [`EventType`] constant
+/// tells the host which event to subscribe to, while `data_from_event` and `data_into_event`
+/// provide the conversions between the opaque [`Event`] variant and the concrete data type.
+pub trait FromIntoEvent: Sized {
+    /// The discriminant used by the host to identify this event.
+    const EVENT_TYPE: EventType;
+
+    /// The WIT-generated data record carried by this event.
+    type Data;
+
+    /// Extracts the event data from an [`Event`] variant.
+    ///
+    /// # Panics
+    /// Panics if the [`Event`] variant does not match [`Self::EVENT_TYPE`].
+    fn data_from_event(event: Event) -> Self::Data;
+
+    /// Wraps event data back into the corresponding [`Event`] variant.
+    fn data_into_event(data: Self::Data) -> Event;
+}
+
+/// A convenience alias for the data type associated with an event.
+pub type EventData<E> = <E as FromIntoEvent>::Data;
+
+pub use crate::BoxFuture;
+
+/// A handler for a specific event type.
+///
+/// Implement this trait to process an event. The `handle` method receives the server
+/// handle and the event data, and returns the (potentially modified) event data.
+///
+/// ```rust,ignore
+/// struct OnJoin;
+///
+/// impl EventHandler<PlayerJoinEvent> for OnJoin {
+///     async fn handle(&self, _server: Server, event: EventData<PlayerJoinEvent>) -> EventData<PlayerJoinEvent> {
+///         event.player.send_system_message(&TextComponent::text("Welcome!"), false).await;
+///         event
+///     }
+/// }
+/// ```
+#[allow(async_fn_in_trait)]
+pub trait EventHandler<E: FromIntoEvent> {
+    /// Processes the event and returns the (potentially modified) data.
+    async fn handle(&self, server: Server, event: E::Data) -> E::Data;
+}
+
+pub(crate) trait ErasedEventHandler: Send + Sync {
+    fn handle_erased(&self, server: Server, event: Event) -> BoxFuture<'_, Event>;
+}
+
+struct HandlerWrapper<E: FromIntoEvent, H> {
+    handler: H,
+    _phantom: PhantomData<E>,
+}
+
+impl<E: FromIntoEvent + Send + Sync, H: EventHandler<E> + Send + Sync> ErasedEventHandler
+    for HandlerWrapper<E, H>
+{
+    fn handle_erased(&self, server: Server, event: Event) -> BoxFuture<'_, Event> {
+        Box::pin(async move {
+            let data = E::data_from_event(event);
+            let result = self.handler.handle(server, data).await;
+            E::data_into_event(result)
+        })
+    }
+}
+
+impl Context {
+    /// Registers an event handler with the plugin.
+    ///
+    /// The handler must implement the [`EventHandler`] trait.
+    /// The event the handler returns updates the event (every handler's, whatever `blocking`
+    /// says); handlers run from `Lowest` to `Highest` priority.
+    pub fn register_event_handler<
+        E: FromIntoEvent + Send + Sync + 'static,
+        H: EventHandler<E> + Send + Sync + 'static,
+    >(
+        &self,
+        handler: H,
+        event_priority: EventPriority,
+        blocking: bool,
+    ) -> Result<u32> {
+        let id = NEXT_HANDLER_ID.fetch_add(1, Ordering::Relaxed);
+        let wrapped = HandlerWrapper {
+            handler,
+            _phantom: PhantomData::<E>,
+        };
+        EVENT_HANDLERS
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(id, Arc::new(wrapped));
+
+        self.register_event(id, E::EVENT_TYPE, event_priority, blocking);
+        Ok(id)
+    }
+
+    /// Registers an event handler that is skipped while the event is cancelled (Paper
+    /// `ignoreCancelled = true`). Its returned event updates the event, like every handler's.
+    pub fn register_event_handler_ignoring_cancelled<
+        E: FromIntoEvent + Send + Sync + 'static,
+        H: EventHandler<E> + Send + Sync + 'static,
+    >(
+        &self,
+        handler: H,
+        event_priority: EventPriority,
+    ) -> Result<u32> {
+        let id = NEXT_HANDLER_ID.fetch_add(1, Ordering::Relaxed);
+        let wrapped = HandlerWrapper {
+            handler,
+            _phantom: PhantomData::<E>,
+        };
+        EVENT_HANDLERS
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(id, Arc::new(wrapped));
+
+        self.register_event_with_options(id, E::EVENT_TYPE, event_priority, true);
+        Ok(id)
+    }
+}

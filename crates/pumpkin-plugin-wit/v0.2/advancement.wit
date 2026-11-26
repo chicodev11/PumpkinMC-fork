@@ -1,0 +1,63 @@
+package pumpkin:plugin@0.2.0;
+
+interface advancement {
+    use text.{text-component};
+    use item-stack.{item-stack};
+
+    /// Frame type for an advancement.
+    enum frame-type {
+        task,
+        challenge,
+        goal,
+    }
+
+    /// Display information for an advancement.
+    record advancement-display {
+        title: text-component,
+        description: text-component,
+        frame: frame-type,
+        show-toast: bool,
+        hidden: bool,
+        announce-to-chat: bool,
+        background: option<string>,
+        x: f32,
+        y: f32,
+    }
+
+    /// Detailed information about an advancement.
+    record advancement-info {
+        id: string,
+        parent-id: option<string>,
+        criteria: list<string>,
+        display: option<advancement-display>,
+    }
+
+    /// An advancement a plugin adds without a datapack (Paper `UnsafeValues#loadAdvancement`),
+    /// for `server.register-advancement`. Criteria use vanilla's `minecraft:impossible`
+    /// trigger: the plugin grants them with `player.award-advancement-criterion`. Vanilla
+    /// visibility applies (a tree shows once something in it is done).
+    record advancement-definition {
+        /// e.g. `myplugin:quests/root`.
+        id: string,
+        /// An advancement registered before (vanilla or plugin); none makes a new tab.
+        parent-id: option<string>,
+        /// None hides it from the advancement screen (like vanilla recipe advancements).
+        display: option<advancement-display>,
+        /// The icon shown with the display.
+        icon: option<item-stack>,
+        /// Criterion names, at least one.
+        criteria: list<string>,
+        /// Groups of criteria where one per group is needed; empty means every criterion.
+        requirements: list<list<string>>,
+        /// Experience given on completion.
+        experience: s32,
+    }
+
+    /// Represents progress of an advancement for a player.
+    record advancement-progress {
+        advancement-id: string,
+        done: bool,
+        awarded-criteria: list<string>,
+        remaining-criteria: list<string>,
+    }
+}

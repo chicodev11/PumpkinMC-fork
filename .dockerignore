@@ -1,0 +1,2 @@
+# Dockerfile downloads a prebuilt release binary and needs no build context files.
+*

@@ -1,0 +1,407 @@
+/// Custom (plugin) blocks with their own ids, states and properties.
+///
+/// A custom block gets real server-side block states appended after the vanilla ones: its own
+/// hardness, tool, shapes, light, sounds, loot, piston reaction and tags. Clients never see
+/// those states; every state names a vanilla `client-state` that clients are shown instead
+/// (a note block, tripwire or mushroom state that a resource pack retextures, for example).
+///
+/// Blocks can only be registered while plugins load (`on-load`). Once every plugin is loaded
+/// the registry is fixed and `register-block` returns an error. State ids stay the same for the
+/// whole run, but may differ between runs: store blocks by name and properties, never by id.
+///
+/// Worlds save custom blocks by name and properties. A world loaded without the plugin keeps
+/// them as placeholders (unbreakable, shown as bedrock) and saves them back unchanged.
+interface custom-block {
+    use common.{block-pos, nbt-tree};
+    use %world.{%world, entity, block-direction};
+    use player.{player};
+    use item-stack.{item-stack};
+
+    /// An axis-aligned box in block coordinates (0.0-1.0 covers the block).
+    record shape-box {
+        min-x: f64,
+        min-y: f64,
+        min-z: f64,
+        max-x: f64,
+        max-y: f64,
+        max-z: f64,
+    }
+
+    /// A collision or outline shape.
+    variant block-shape {
+        empty,
+        full-cube,
+        boxes(list<shape-box>),
+    }
+
+    /// How the block reacts to pistons.
+    enum piston-reaction {
+        normal,
+        destroy,
+        block,
+        ignore,
+        push-only,
+    }
+
+    /// Sounds by string id (resource pack sounds such as `myplugin:block.ruby.break`).
+    record sound-group {
+        volume: f32,
+        pitch: f32,
+        break-sound: string,
+        step-sound: string,
+        place-sound: string,
+        hit-sound: string,
+        fall-sound: string,
+    }
+
+    /// A state property and its values, in order.
+    record block-property {
+        name: string,
+        values: list<string>,
+    }
+
+    /// One state of a custom block.
+    record block-state-definition {
+        /// The vanilla state clients are shown (required).
+        client-state: u16,
+        /// Mining hardness; -1 is unbreakable.
+        hardness: f32,
+        /// Explosion resistance.
+        resistance: f32,
+        /// Emitted light, 0-15.
+        luminance: u8,
+        /// Light absorbed, 0-15. None: 15 for an occluding full cube, else 0.
+        opacity: option<u8>,
+        collision: block-shape,
+        /// None: same as `collision`.
+        outline: option<block-shape>,
+        piston: piston-reaction,
+        /// Vanilla sound group by `SoundType` name (`STONE`, `WOOD`, `METAL`, ...).
+        sound-group: string,
+        /// Resource pack sounds played instead of the vanilla group's.
+        custom-sounds: option<sound-group>,
+        /// Note block instrument when placed under one (`harp`, `basedrum`, ...). None: harp.
+        instrument: option<string>,
+        /// Map colour id (vanilla `MapColor` id).
+        map-color: u8,
+        /// Loot table dropped when broken (`myplugin:blocks/ruby_ore`). None: drops nothing.
+        loot-table: option<string>,
+        /// Drops only with the right tool (vanilla `requiresCorrectToolForDrops`). The right
+        /// tool comes from tags such as `minecraft:mineable/pickaxe` and `minecraft:needs_iron_tool`.
+        requires-tool: bool,
+        /// Can be replaced by placing a block into it (like grass or snow).
+        replaceable: bool,
+        /// Fire can destroy it.
+        burnable: bool,
+        /// Receives random ticks.
+        random-ticks: bool,
+        /// Conducts redstone. None: occluding full cubes do.
+        redstone-conductor: option<bool>,
+        /// Occludes light and faces. None: full cube collision does.
+        occludes: option<bool>,
+    }
+
+    /// A custom block.
+    record block-definition {
+        /// `namespace:path`; the `minecraft` namespace is not allowed.
+        id: string,
+        /// State properties. States are every combination, in vanilla order (the last
+        /// property changes fastest).
+        properties: list<block-property>,
+        /// Index of the default state.
+        default-state: u16,
+        /// One definition per state, or a single one for every state.
+        states: list<block-state-definition>,
+        /// Slipperiness (0.6 default, ice 0.98).
+        friction: option<f32>,
+        /// Walking speed multiplier (soul sand 0.4).
+        speed-factor: option<f32>,
+        /// Jump multiplier (honey 0.5).
+        jump-factor: option<f32>,
+        /// Vanilla item id for the block's item form (pick block fallback). None: no item.
+        item: option<string>,
+        /// Fire spread and burn chances.
+        flammable: option<tuple<u8, u8>>,
+        /// Block tags the block belongs to (`minecraft:mineable/pickaxe`, `minecraft:climbable`, ...).
+        tags: list<string>,
+        /// Behaviour callbacks the plugin answers through `handle-block-callback`. Only these
+        /// are sent; everything else behaves like a plain block.
+        callbacks: block-callbacks,
+        /// Custom block entity type (registered with `register-block-entity-type`) created
+        /// with the block.
+        block-entity: option<string>,
+    }
+
+    /// Behaviour callbacks a custom block can answer.
+    flags block-callbacks {
+        /// Right click, with or without an item.
+        on-use,
+        /// Whether the block may be placed (or stay) at a position.
+        can-place,
+        /// The state to place instead of the default state.
+        placement-state,
+        /// After the block was placed.
+        on-placed,
+        /// After a player broke the block.
+        on-broken,
+        /// Keep or replace the loot table's drops.
+        drops,
+        /// A neighbouring block changed.
+        on-neighbor-update,
+        /// Random ticks (states also need `random-ticks`).
+        on-random-tick,
+        /// A scheduled tick fired (schedule one with `world.schedule-block-tick`).
+        on-scheduled-tick,
+        /// An entity is inside the block's shape.
+        on-entity-inside,
+        /// An entity walks on the block.
+        on-stepped-on,
+        /// Destroyed by an explosion.
+        on-exploded,
+        /// A player started hitting the block.
+        on-attacked,
+        /// Removed or replaced, for any reason.
+        on-removed,
+        /// Whether bone meal works on the block now (`allowed`; default yes). Only asked
+        /// when the block also has `on-bonemeal`.
+        can-bonemeal,
+        /// Bone meal (a player or a dispenser) was used on the block: grow it here. Fires
+        /// `block-fertilize-event` first; the bone meal is used up.
+        on-bonemeal,
+    }
+
+    /// Answer to `on-use` (vanilla `InteractionResult`).
+    enum use-result {
+        /// Not handled: the held item is used next (placing a block against this one, ...).
+        pass,
+        /// Handled; swings the hand.
+        success,
+        /// Handled without a swing.
+        consume,
+        /// Handled as a failure; nothing else happens.
+        fail,
+    }
+
+    record use-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        player: player,
+        /// The held item (empty when the hand is empty).
+        item: item-stack,
+        face: block-direction,
+        cursor-x: f32,
+        cursor-y: f32,
+        cursor-z: f32,
+    }
+
+    record place-context {
+        %world: %world,
+        pos: block-pos,
+        /// The state that would be placed (the default state for `placement-state`).
+        state: u16,
+        player: option<player>,
+        face: option<block-direction>,
+    }
+
+    record placed-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        old-state: u16,
+    }
+
+    record player-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        player: player,
+    }
+
+    record drops-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        /// The tool used (empty if none).
+        tool: item-stack,
+        /// What the loot table dropped.
+        drops: list<item-stack>,
+    }
+
+    record neighbor-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        /// Id of the block that changed next to this one.
+        source-block: string,
+    }
+
+    record block-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+    }
+
+    record entity-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        entity: entity,
+    }
+
+    record removed-context {
+        %world: %world,
+        pos: block-pos,
+        state: u16,
+        /// Moved by a piston rather than removed.
+        moved: bool,
+    }
+
+    /// One behaviour callback.
+    variant block-call {
+        on-use(use-context),
+        can-place(place-context),
+        placement-state(place-context),
+        on-placed(placed-context),
+        on-broken(player-context),
+        drops(drops-context),
+        on-neighbor-update(neighbor-context),
+        on-random-tick(block-context),
+        on-scheduled-tick(block-context),
+        on-entity-inside(entity-context),
+        on-stepped-on(entity-context),
+        on-exploded(block-context),
+        on-attacked(player-context),
+        on-removed(removed-context),
+        can-bonemeal(block-context),
+        on-bonemeal(block-context),
+    }
+
+    /// Answer to a callback. `none` (or an answer of the wrong kind) keeps the default:
+    /// pass for `on-use`, allowed for `can-place`, the default state for `placement-state`,
+    /// the loot table's drops for `drops`.
+    variant block-call-result {
+        none,
+        use-result(use-result),
+        allowed(bool),
+        state(u16),
+        drops(list<item-stack>),
+    }
+
+    /// A registered block's ids.
+    record registered-block {
+        id: string,
+        /// Numeric block id for this run.
+        block-id: u16,
+        /// State ids for this run, in state order.
+        first-state: u16,
+        state-count: u16,
+        default-state: u16,
+    }
+
+    /// Callbacks a custom block entity type can answer.
+    flags block-entity-callbacks {
+        /// Every tick while its chunk ticks.
+        on-tick,
+        /// Created (placed, or loaded from disk) in a world.
+        on-load,
+        /// Its chunk unloads.
+        on-unload,
+        /// Removed (block broken or replaced).
+        on-remove,
+    }
+
+    /// A custom block entity type. Its data is free-form NBT the plugin reads and writes.
+    record block-entity-type-definition {
+        /// `namespace:path`; the `minecraft` namespace is not allowed.
+        id: string,
+        /// Vanilla block entity type clients are shown (`sign`, `skull`, `banner`, ...) with
+        /// the `client_nbt` compound of the data. None: clients see no block entity.
+        client-type: option<string>,
+        callbacks: block-entity-callbacks,
+    }
+
+    /// One custom block entity callback.
+    variant block-entity-call {
+        on-tick(block-context),
+        on-load(block-context),
+        on-unload(block-context),
+        on-remove(block-context),
+    }
+
+    /// Registers a custom block entity type. Only allowed during `on-load`. Register it
+    /// before the blocks that name it.
+    register-block-entity-type: func(definition: block-entity-type-definition) -> result<_, string>;
+
+    /// The type id of the custom block entity at `pos` (also for unknown, preserved ids).
+    get-block-entity-type: func(%world: borrow<%world>, pos: block-pos) -> option<string>;
+
+    /// The data of the custom block entity at `pos`.
+    get-block-entity-data: func(%world: borrow<%world>, pos: block-pos) -> option<nbt-tree>;
+
+    /// Replaces the data of the custom block entity at `pos` (a compound). Changes to the
+    /// `client_nbt` compound are sent to clients. Returns false if there is none.
+    set-block-entity-data: func(%world: borrow<%world>, pos: block-pos, data: nbt-tree) -> result<bool, string>;
+
+    /// Registers (or replaces) a custom item id: a vanilla item stack with components
+    /// (`item_model`, `custom_data`, name ...). Commands (`/give`, item arguments) accept the
+    /// id, and picking a custom block (middle click) gives the item with the block's id. Use
+    /// `player-pick-block-event` to pick something else. Allowed at any time.
+    register-item: func(id: string, item: borrow<item-stack>) -> result<_, string>;
+
+    /// Removes a custom item id. Returns whether it existed.
+    unregister-item: func(id: string) -> bool;
+
+    /// A copy of the custom item `id`.
+    get-item: func(id: string) -> option<item-stack>;
+
+    /// All custom item ids.
+    list-items: func() -> list<string>;
+
+    /// Registers (or replaces) a loot table from vanilla loot table JSON (the format of
+    /// `data/<namespace>/loot_table/*.json`) under `id` (`myplugin:blocks/ruby_ore`). Custom
+    /// blocks name it as their `loot-table`; it also works anywhere a loot table id does.
+    /// Plugin tables survive `/reload` and replace datapack tables with the same id.
+    register-loot-table: func(id: string, json: string) -> result<_, string>;
+
+    /// Removes a plugin loot table. Returns whether it existed.
+    unregister-loot-table: func(id: string) -> bool;
+
+    /// Shows Java clients `view` (its item and components; the real stack's count and custom
+    /// data are kept) for every item stack whose `custom_data` has the string `value` at `key`.
+    /// Applied natively to every item written into a packet, so it costs no plugin call;
+    /// `client-item-view-event` still runs afterwards for per-player changes. Like that event,
+    /// creative mode clients send back what they see.
+    set-client-item-view: func(key: string, value: string, view: borrow<item-stack>) -> result<_, string>;
+
+    /// Removes a client item view. Returns whether it existed.
+    remove-client-item-view: func(key: string, value: string) -> bool;
+
+    /// Registers a block. Only allowed during `on-load`.
+    register-block: func(definition: block-definition) -> result<registered-block, string>;
+
+    /// Whether blocks can still be registered.
+    is-registration-open: func() -> bool;
+
+    /// A registered custom block by id.
+    get-block: func(id: string) -> option<registered-block>;
+
+    /// All registered custom blocks (placeholders excluded).
+    list-blocks: func() -> list<registered-block>;
+
+    /// The state of block `id` (vanilla or custom) with the given properties; unknown
+    /// properties are ignored, missing ones keep the default.
+    get-state: func(id: string, properties: list<tuple<string, string>>) -> option<u16>;
+
+    /// The block id and property values of any state (vanilla or custom).
+    describe-state: func(state: u16) -> option<tuple<string, list<tuple<string, string>>>>;
+
+    /// `state` with one property changed, if the block has that property and value.
+    with-property: func(state: u16, name: string, value: string) -> option<u16>;
+
+    /// Whether `state` belongs to a custom block (or a placeholder).
+    is-custom-state: func(state: u16) -> bool;
+
+    /// The vanilla state clients are shown for `state`.
+    get-client-state: func(state: u16) -> u16;
+}

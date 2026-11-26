@@ -1,0 +1,96 @@
+/// The core context provided to a plugin during initialization and event handling.
+interface context {
+    use server.{server, plugin-generator-settings, world-generator};
+    use event.{event-type, event-priority};
+    use command.{command};
+    use permission.{permission};
+    use player.{java-minecraft-version};
+
+    /// Verified marketplace metadata for signed plugins.
+    record marketplace-metadata {
+        /// The marketplace base URL where this plugin is registered.
+        marketplace-url: string,
+        /// The unique plugin ID on the marketplace.
+        plugin-id: s64,
+        /// The canonical plugin name.
+        plugin-name: string,
+        /// The semver version string of the plugin.
+        version: string,
+        /// Developer ID.
+        dev-id: s64,
+        /// Developer display name or username.
+        dev-name: string,
+        /// Whether this is a paid marketplace plugin.
+        is-paid: bool,
+        /// The buyer / licensee user ID (0 for free/open-source).
+        user-id: s64,
+        /// Unique license key issued to the buyer, if paid.
+        license-key: option<string>,
+        /// ISO-8601 timestamp of when this binary/license was issued.
+        issued-at: string,
+    }
+
+    /// A contextual handle for plugin-related operations.
+    resource context {
+        /// Registers a handler for a specific event.
+        ///
+        /// * `handler-id`: Unique ID for the event handler.
+        /// * `event-type`: The type of event to listen for.
+        /// * `event-priority`: When this handler should be called relative to others.
+        /// * `blocking`: kept for older plugins. Every handler's returned event now updates the
+        ///   event being dispatched (as in Paper, any listener may change it); handlers run one
+        ///   after another, `lowest` priority first and `highest` last, so a higher priority
+        ///   sees and overrides earlier changes. Handlers may suspend.
+        register-event: func(handler-id: u32, event-type: event-type, event-priority: event-priority, blocking: bool);
+
+        /// `register-event` with options. `ignore-cancelled`: the handler is skipped while the
+        /// event is cancelled (Paper `ignoreCancelled = true`).
+        register-event-with-options: func(handler-id: u32, event-type: event-type, event-priority: event-priority, ignore-cancelled: bool);
+
+        /// Registers a new command.
+        ///
+        /// * `command`: The command definition.
+        /// * `permission`: The required permission node to execute this command.
+        register-command: func(command: command, permission: string);
+
+        /// Removes a command (and its aliases) this plugin registered, and resends the command
+        /// tree to online players. Registering the name again brings it back.
+        unregister-command: func(name: string);
+
+        /// Offers a chunk generator for the server's default worlds under `name` (Paper's
+        /// `getDefaultWorldGenerator`). A dimension whose `[world.generators]` entry in the
+        /// advanced config is `"<plugin name>:<name>"` (e.g. `"minecraft:overworld" =
+        /// "example:terrain"`) generates with it from its first chunk. The default worlds get
+        /// their generators right after all plugins have loaded, so call this in `on-load`.
+        /// (A plugin can also call `set-chunk-generator` on a default world in `on-load`: no
+        /// chunk of a default world is generated before plugins load.)
+        register-world-generator: func(name: string, settings: plugin-generator-settings);
+
+        /// Like `register-world-generator`, with any generator: `noise-warped`,
+        /// `noise-with-plugin-biomes`, `flat`, `amplified`, a plugin generator, ... Generator ids
+        /// in it are this plugin's. `amplified` and `large-biomes` only change the overworld.
+        register-world-generator-with: func(name: string, generator: world-generator);
+
+        /// Registers a permission node with the server.
+        register-permission: func(permission: permission) -> result<_, string>;
+
+        /// Admits Java clients on these versions besides the server's own. The plugin
+        /// translates their packets in the connection and packet events. Replaces this
+        /// plugin's earlier list; dropped when it unloads.
+        register-java-versions: func(versions: list<java-minecraft-version>);
+
+        /// Admits Bedrock clients on these raw network protocol versions besides the server's own.
+        /// Replaces this plugin's earlier list; dropped when it unloads.
+        register-bedrock-versions: func(protocols: list<u32>);
+
+        /// Returns the path to the plugin's private data folder.
+        get-data-folder: func() -> string;
+
+        /// Returns the global server instance.
+        get-server: func() -> server;
+
+        /// Returns verified marketplace metadata if this plugin binary is signed, or none if unsigned.
+        get-marketplace-metadata: func() -> option<marketplace-metadata>;
+    }
+}
+
