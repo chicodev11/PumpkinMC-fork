@@ -336,21 +336,29 @@ where
             // Format the event
             let mut visitor = StringVisitor::default();
             event.record(&mut visitor);
-            let message = visitor.0;
+            let clean_message = remove_ansi_color_code(&visitor.message);
 
-            let clean_message = remove_ansi_color_code(&message);
-
-            // Write to file in the console's shape: `HH:MM:SS  LEVEL message`
-            // (the level is right-aligned to five columns, like tracing-subscriber's fmt layer).
+            // Paper's latest.log shape: `[HH:MM:SS] [thread/LEVEL]: message`, with
+            // `[Plugin] ` before a plugin's message.
             let level = level.as_str();
+            let thread = std::thread::current();
+            let thread = thread.name().unwrap_or("unknown");
+            let plugin = visitor
+                .plugin
+                .as_deref()
+                .map(|p| format!("[{p}] "))
+                .unwrap_or_default();
             let _ = if let Some((offset, format)) = &self.timestamp {
                 let time = now
                     .to_offset(*offset)
                     .format(format.as_slice())
                     .unwrap_or_default();
-                writeln!(data.file, "{time} {level:>5} {clean_message}")
+                writeln!(
+                    data.file,
+                    "[{time}] [{thread}/{level}]: {plugin}{clean_message}"
+                )
             } else {
-                writeln!(data.file, "{level} {clean_message}")
+                writeln!(data.file, "[{thread}/{level}]: {plugin}{clean_message}")
             };
             let _ = data.file.flush();
 
@@ -366,16 +374,31 @@ where
 }
 
 #[derive(Default)]
-struct StringVisitor(String);
+struct StringVisitor {
+    message: String,
+    /// The `plugin` field `plugin_log!` attaches.
+    plugin: Option<String>,
+}
 
 impl tracing::field::Visit for StringVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        match field.name() {
+            "message" => self.message = value.to_string(),
+            "plugin" => self.plugin = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            self.0 = format!("{value:?}");
-            // Remove quotes if present
-            if self.0.starts_with('"') && self.0.ends_with('"') {
-                self.0 = self.0[1..self.0.len() - 1].to_string();
-            }
+        let mut text = format!("{value:?}");
+        // Remove quotes if present
+        if text.len() >= 2 && text.starts_with('"') && text.ends_with('"') {
+            text = text[1..text.len() - 1].to_string();
+        }
+        match field.name() {
+            "message" => self.message = text,
+            "plugin" => self.plugin = Some(text),
+            _ => {}
         }
     }
 }
