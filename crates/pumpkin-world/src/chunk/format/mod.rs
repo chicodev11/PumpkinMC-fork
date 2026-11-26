@@ -1339,6 +1339,7 @@ impl ChunkData {
             inhabited_time: AtomicU64::new(inhabited_time),
             custom_data: std::sync::Mutex::new(custom_data),
             structures: std::sync::Mutex::new(structures),
+            preserved_tags: std::sync::Mutex::new(NbtCompound::new()),
         })
     }
 
