@@ -13,7 +13,8 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use time::{Duration, OffsetDateTime};
+use time::format_description::BorrowedFormatItem;
+use time::{Duration, OffsetDateTime, UtcOffset};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
@@ -147,8 +148,14 @@ struct GzipRollingLoggerData {
     latest_filename: String,
 }
 
+/// How the file logger stamps each line: the local offset and the configured
+/// `logging.timestamp_format`.
+pub type FileLogTimestamp = (UtcOffset, Vec<BorrowedFormatItem<'static>>);
+
 pub struct GzipRollingLogger {
     log_level: LevelFilter,
+    /// `None` when `logging.timestamp` is off.
+    timestamp: Option<FileLogTimestamp>,
     data: std::sync::Mutex<GzipRollingLoggerData>,
 }
 
@@ -156,6 +163,7 @@ impl GzipRollingLogger {
     pub fn new(
         log_level: LevelFilter,
         filename: String,
+        timestamp: Option<FileLogTimestamp>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let now = time::OffsetDateTime::now_utc();
         std::fs::create_dir_all(LOG_DIR)?;
@@ -188,6 +196,7 @@ impl GzipRollingLogger {
 
         Ok(Self {
             log_level,
+            timestamp,
             data: std::sync::Mutex::new(GzipRollingLoggerData {
                 current_day_of_month: now.day(),
                 last_rotate_time: now,
@@ -331,8 +340,18 @@ where
 
             let clean_message = remove_ansi_color_code(&message);
 
-            // Write to file
-            let _ = writeln!(data.file, "[{level}] {clean_message}");
+            // Write to file in the console's shape: `HH:MM:SS  LEVEL message`
+            // (the level is right-aligned to five columns, like tracing-subscriber's fmt layer).
+            let level = level.as_str();
+            let _ = if let Some((offset, format)) = &self.timestamp {
+                let time = now
+                    .to_offset(*offset)
+                    .format(format.as_slice())
+                    .unwrap_or_default();
+                writeln!(data.file, "{time} {level:>5} {clean_message}")
+            } else {
+                writeln!(data.file, "{level} {clean_message}")
+            };
             let _ = data.file.flush();
 
             // Check if we need to rotate

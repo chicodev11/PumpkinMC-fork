@@ -105,10 +105,32 @@ pub fn init_logger(advanced_config: &AdvancedConfiguration) {
             EnvFilter::new(level_str)
         });
 
+        // Shared by the console timer and the file logger. Read the local offset here, before
+        // the runtime spawns threads (`current_local_offset` can refuse on Unix after that).
+        let timestamp = advanced_config.logging.timestamp.then(|| {
+            let local_offset =
+                time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+            let format_str: &'static str = Box::leak(
+                advanced_config
+                    .logging
+                    .timestamp_format
+                    .clone()
+                    .into_boxed_str(),
+            );
+            let timer_format = time::format_description::parse(format_str).unwrap_or_else(|_| {
+                time::macros::format_description!("[hour]:[minute]:[second]").to_vec()
+            });
+            (local_offset, timer_format)
+        });
+
         let file_logger: Option<GzipRollingLogger> = if advanced_config.logging.file.is_empty() {
             None
         } else {
-            match GzipRollingLogger::new(level, advanced_config.logging.file.clone()) {
+            match GzipRollingLogger::new(
+                level,
+                advanced_config.logging.file.clone(),
+                timestamp.clone(),
+            ) {
                 Ok(logger) => Some(logger),
                 Err(err) => {
                     error!("Failed to initialize file logger: {err}");
@@ -156,19 +178,7 @@ pub fn init_logger(advanced_config: &AdvancedConfiguration) {
             .with_thread_names(advanced_config.logging.threads)
             .with_thread_ids(advanced_config.logging.thread_ids);
 
-        if advanced_config.logging.timestamp {
-            let local_offset =
-                time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-            let format_str: &'static str = Box::leak(
-                advanced_config
-                    .logging
-                    .timestamp_format
-                    .clone()
-                    .into_boxed_str(),
-            );
-            let timer_format = time::format_description::parse(format_str).unwrap_or_else(|_| {
-                time::macros::format_description!("[hour]:[minute]:[second]").to_vec()
-            });
+        if let Some((local_offset, timer_format)) = timestamp {
             let fmt_layer =
                 fmt_layer.with_timer(fmt::time::OffsetTime::new(local_offset, timer_format));
             let registry = tracing_subscriber::registry()
