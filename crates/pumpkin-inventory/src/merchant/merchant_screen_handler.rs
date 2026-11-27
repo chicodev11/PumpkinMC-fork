@@ -692,7 +692,13 @@ mod tests {
 
         fn enqueue_set_held_item_packet(&self, _packet: &CSetSelectedSlot) {}
 
-        fn enqueue_equipment_change(&self, _slot: &EquipmentSlot, _stack: &ItemStack) {}
+        fn enqueue_equipment_change(
+            &self,
+            _slot: &EquipmentSlot,
+            _previous: &ItemStack,
+            _stack: &ItemStack,
+        ) {
+        }
 
         fn award_experience(&self, amount: i32) {
             self.experience.fetch_add(amount, Ordering::Relaxed);

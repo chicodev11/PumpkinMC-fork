@@ -205,7 +205,12 @@ pub trait InventoryPlayer: Send + Sync {
     fn enqueue_set_held_item_packet(&self, packet: &CSetSelectedSlot);
 
     /// Sends an equipment change packet.
-    fn enqueue_equipment_change(&self, slot: &EquipmentSlot, stack: &ItemStack);
+    fn enqueue_equipment_change(
+        &self,
+        slot: &EquipmentSlot,
+        previous: &ItemStack,
+        stack: &ItemStack,
+    );
 
     /// Awards experience points to the player (used for furnace smelting, etc.)
     fn award_experience(&self, amount: i32);
@@ -1016,10 +1021,11 @@ pub trait ScreenHandler: Send + Sync {
                             let eq_slot = prev_stack
                                 .get_data_component::<EquippableImpl>()
                                 .map_or(&EquipmentSlot::MAIN_HAND, |e| e.slot);
-                            player.enqueue_equipment_change(eq_slot, ItemStack::EMPTY);
+                            player.enqueue_equipment_change(eq_slot, &prev_stack, ItemStack::EMPTY);
                         } else if slot_index == OFF_HAND_SCREEN_SLOT {
                             player.enqueue_equipment_change(
                                 &EquipmentSlot::OFF_HAND,
+                                &prev_stack,
                                 if remaining.is_empty() {
                                     ItemStack::EMPTY
                                 } else {
@@ -1249,7 +1255,11 @@ pub trait ScreenHandler: Send + Sync {
                             && slot.can_insert(&cursor_stack)
                         {
                             let equipped = cursor_stack.copy_with_count(1);
-                            player.enqueue_equipment_change(equipment_slot, &equipped);
+                            player.enqueue_equipment_change(
+                                equipment_slot,
+                                ItemStack::EMPTY,
+                                &equipped,
+                            );
                         } else if self.window_type().is_none() && slot_index == OFF_HAND_SCREEN_SLOT
                         {
                             let transfer_count = if click_type == MouseClick::Left {
@@ -1258,7 +1268,11 @@ pub trait ScreenHandler: Send + Sync {
                                 1
                             };
                             let equipped = cursor_stack.copy_with_count(transfer_count);
-                            player.enqueue_equipment_change(&EquipmentSlot::OFF_HAND, &equipped);
+                            player.enqueue_equipment_change(
+                                &EquipmentSlot::OFF_HAND,
+                                ItemStack::EMPTY,
+                                &equipped,
+                            );
                         }
 
                         let transfer_count = if click_type == MouseClick::Left {
@@ -1288,7 +1302,11 @@ pub trait ScreenHandler: Send + Sync {
                                     .map_or(&EquipmentSlot::MAIN_HAND, |equippable| {
                                         equippable.slot
                                     });
-                                player.enqueue_equipment_change(equipment_slot, ItemStack::EMPTY);
+                                player.enqueue_equipment_change(
+                                    equipment_slot,
+                                    &slot_stack,
+                                    ItemStack::EMPTY,
+                                );
                             } else if self.window_type().is_none()
                                 && slot_index == OFF_HAND_SCREEN_SLOT
                             {
@@ -1296,6 +1314,7 @@ pub trait ScreenHandler: Send + Sync {
                                 let remaining = slot.get_cloned_stack();
                                 player.enqueue_equipment_change(
                                     &EquipmentSlot::OFF_HAND,
+                                    &slot_stack,
                                     if remaining.is_empty() {
                                         ItemStack::EMPTY
                                     } else {
@@ -1314,11 +1333,18 @@ pub trait ScreenHandler: Send + Sync {
                             && equipment_slot.slot_type() == EquipmentType::HumanoidArmor
                             && (5..9).contains(&slot_index)
                         {
-                            player.enqueue_equipment_change(equipment_slot, &cursor_stack);
+                            player.enqueue_equipment_change(
+                                equipment_slot,
+                                &slot_stack,
+                                &cursor_stack,
+                            );
                         } else if self.window_type().is_none() && slot_index == OFF_HAND_SCREEN_SLOT
                         {
-                            player
-                                .enqueue_equipment_change(&EquipmentSlot::OFF_HAND, &cursor_stack);
+                            player.enqueue_equipment_change(
+                                &EquipmentSlot::OFF_HAND,
+                                &slot_stack,
+                                &cursor_stack,
+                            );
                         }
 
                         if matching_stack {

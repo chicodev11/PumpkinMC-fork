@@ -1967,12 +1967,56 @@ impl Player {
         }
     }
 
-    /// Broadcasts the equipment behind a changed player screen slot (armor, offhand, held hotbar slot)
-    pub fn sync_screen_slot_equipment(&self, screen_slot: usize, stack: &ItemStack) {
+    /// Vanilla `LivingEntity.onEquipItem` with `Player.doesEmitEquipEvent`: the item's equip
+    /// sound when it goes into its own slot, and `equip`/`unequip` game events for armor.
+    /// Nothing happens for spectators, on the first tick or when the item did not change.
+    pub fn on_equip_item(&self, slot: &EquipmentSlot, old: &ItemStack, new: &ItemStack) {
+        let entity = self.get_entity();
+        if self.is_spectator()
+            || old.are_items_and_components_equal(new)
+            || entity.first_tick.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        let equippable = new.get_data_component::<EquippableImpl>();
+        if !entity.is_silent()
+            && let Some(equippable) = equippable
+            && std::mem::discriminant(equippable.slot) == std::mem::discriminant(slot)
+        {
+            self.world().play_sound_event(
+                &equippable.equip_sound,
+                SoundCategory::Players,
+                &self.position(),
+            );
+        }
+        if slot.slot_type() == pumpkin_data::data_component_impl::EquipmentType::HumanoidArmor {
+            let event = if equippable.is_some() {
+                pumpkin_data::game_event::GameEvent::Equip
+            } else {
+                pumpkin_data::game_event::GameEvent::Unequip
+            };
+            self.world().emit_game_event_with_context(
+                event.name(),
+                entity.pos.load(),
+                &crate::world::game_event::GameEventContext {
+                    source_entity: Some(self),
+                },
+            );
+        }
+    }
+
+    /// Broadcasts the equipment behind a changed player screen slot (armor, offhand, held hotbar
+    /// slot); `previous` is what the slot held before.
+    pub fn sync_screen_slot_equipment(
+        &self,
+        screen_slot: usize,
+        previous: &ItemStack,
+        stack: &ItemStack,
+    ) {
         if let Some(slot) =
             pumpkin_inventory::screen_handler::player_screen_equipment_slot(screen_slot)
         {
-            self.enqueue_equipment_change(&slot, stack);
+            self.enqueue_equipment_change(&slot, previous, stack);
         } else if (36..45).contains(&screen_slot)
             && self.inventory().get_selected_slot() as usize == screen_slot - 36
         {
@@ -9776,17 +9820,15 @@ impl InventoryPlayer for Player {
         );
     }
 
-    fn enqueue_equipment_change(&self, slot: &EquipmentSlot, stack: &ItemStack) {
+    fn enqueue_equipment_change(
+        &self,
+        slot: &EquipmentSlot,
+        previous: &ItemStack,
+        stack: &ItemStack,
+    ) {
         self.living_entity
             .send_equipment_changes(&[(slot.clone(), stack.clone())]);
-
-        if let Some(equippable) = stack.get_data_component::<EquippableImpl>() {
-            self.world().play_sound_event(
-                &equippable.equip_sound,
-                SoundCategory::Players,
-                &self.position(),
-            );
-        }
+        self.on_equip_item(slot, previous, stack);
     }
 
     fn award_experience(&self, amount: i32) {

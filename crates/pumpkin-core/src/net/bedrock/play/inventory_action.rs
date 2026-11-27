@@ -105,13 +105,11 @@ impl BedrockClient {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-                    let is_armor_equipped = player_screen_handler
+                    let previous = player_screen_handler
                         .get_slot(screen_slot)
-                        .get_stack()
-                        .are_equal(&item_stack);
-
-                    if !is_armor_equipped {
-                        player.sync_screen_slot_equipment(screen_slot, &item_stack);
+                        .get_cloned_stack();
+                    if !previous.are_equal(&item_stack) {
+                        player.sync_screen_slot_equipment(screen_slot, &previous, &item_stack);
                     }
 
                     player_screen_handler
@@ -385,17 +383,20 @@ impl BedrockClient {
                                 }
                             }
                             if let Some(equippable) = held.get_data_component::<EquippableImpl>() {
-                                let should_change = {
+                                let previous = {
                                     let inventory = player.inventory();
                                     let equipment_guard = inventory
                                         .entity_equipment
                                         .lock()
                                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                    let current_equipped = equipment_guard.get(equippable.slot);
-                                    !current_equipped.are_items_and_components_equal(&held)
+                                    equipment_guard.get(equippable.slot)
                                 };
-                                if should_change {
-                                    player.enqueue_equipment_change(equippable.slot, &held);
+                                if !previous.are_items_and_components_equal(&held) {
+                                    player.enqueue_equipment_change(
+                                        equippable.slot,
+                                        &previous,
+                                        &held,
+                                    );
 
                                     let inventory = player.inventory();
                                     let mut equipment_guard = inventory

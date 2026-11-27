@@ -654,6 +654,7 @@ mod tests {
         fn enqueue_equipment_change(
             &self,
             _slot: &pumpkin_data::data_component_impl::EquipmentSlot,
+            _previous: &ItemStack,
             _stack: &ItemStack,
         ) {
         }

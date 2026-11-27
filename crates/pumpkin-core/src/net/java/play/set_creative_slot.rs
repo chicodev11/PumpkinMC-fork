@@ -40,12 +40,11 @@ impl JavaClient {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let is_armor_equipped = player_screen_handler
+            let previous = player_screen_handler
                 .get_slot(packet.slot as usize)
-                .get_stack()
-                .are_equal(&item_stack);
-            if !is_armor_equipped {
-                player.sync_screen_slot_equipment(packet.slot as usize, &item_stack);
+                .get_cloned_stack();
+            if !previous.are_equal(&item_stack) {
+                player.sync_screen_slot_equipment(packet.slot as usize, &previous, &item_stack);
             }
 
             player_screen_handler

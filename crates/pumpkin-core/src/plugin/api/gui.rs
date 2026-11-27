@@ -345,7 +345,13 @@ mod tests {
         }
         fn enqueue_slot_set_packet(&self, _packet: &CSetPlayerInventory) {}
         fn enqueue_set_held_item_packet(&self, _packet: &CSetSelectedSlot) {}
-        fn enqueue_equipment_change(&self, _slot: &EquipmentSlot, _stack: &ItemStack) {}
+        fn enqueue_equipment_change(
+            &self,
+            _slot: &EquipmentSlot,
+            _previous: &ItemStack,
+            _stack: &ItemStack,
+        ) {
+        }
         fn award_experience(&self, _amount: i32) {}
         fn increment_stat(&self, _category: StatisticCategory, _stat_id: i32, _amount: i32) {}
         fn play_block_sound(&self, _sound: Sound, _pitch: f32) {}

@@ -1306,7 +1306,7 @@ fn update_slot_stack(
             let current_stack =
                 screen_handler.get_behaviour().slots[screen_slot].get_cloned_stack();
             if !current_stack.are_items_and_components_equal(&new_stack) {
-                player.sync_screen_slot_equipment(screen_slot, &new_stack);
+                player.sync_screen_slot_equipment(screen_slot, &current_stack, &new_stack);
             }
         }
 

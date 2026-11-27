@@ -105,8 +105,8 @@ impl PlayerScreenHandler {
         // Add main inventory and hotbar
         player_screen_handler.add_player_slots(&player_inventory);
 
-        // Offhand slot (index 40 in player inventory, 45 in screen handler)
-        // TODO: onEquipStack callback for offhand
+        // Offhand slot (index 40 in player inventory, 45 in screen handler). Vanilla's
+        // `onEquipItem` for it runs where the click handlers call `enqueue_equipment_change`.
         player_screen_handler.add_slot(Arc::new(NormalSlot::new(player_inventory.clone(), 40)));
 
         player_screen_handler
@@ -132,8 +132,9 @@ impl ScreenHandler for PlayerScreenHandler {
 
     fn on_closed(&mut self, player: &dyn InventoryPlayer) {
         self.default_on_closed(player);
-        //TODO: this.craftingResultInventory.clear();
         self.drop_inventory(player, self.crafting_inventory.clone());
+        // Vanilla `resultSlots.clearContent()`: the result follows the grid, which is now empty
+        self.get_slot(0).set_stack(ItemStack::EMPTY.clone());
     }
 
     /// Performs quick move (shift-click) for the given slot.
@@ -169,7 +170,7 @@ impl ScreenHandler for PlayerScreenHandler {
                 let result = self.insert_item(&mut slot_stack, 9, 45, false);
 
                 if result {
-                    player.enqueue_equipment_change(equipment_slot, ItemStack::EMPTY);
+                    player.enqueue_equipment_change(equipment_slot, &stack_prev, ItemStack::EMPTY);
                 }
                 result
             } else if equipment_slot.slot_type() == EquipmentType::HumanoidArmor
@@ -187,7 +188,7 @@ impl ScreenHandler for PlayerScreenHandler {
 
                 if result {
                     let equipped = self.get_slot(index as usize).get_cloned_stack();
-                    player.enqueue_equipment_change(equipment_slot, &equipped);
+                    player.enqueue_equipment_change(equipment_slot, ItemStack::EMPTY, &equipped);
                 }
                 result
             } else if matches!(equipment_slot, EquipmentSlot::OffHand(_))
@@ -199,7 +200,11 @@ impl ScreenHandler for PlayerScreenHandler {
                 let result = self.insert_item(&mut slot_stack, index, index + 1, false);
 
                 if result {
-                    player.enqueue_equipment_change(&EquipmentSlot::OFF_HAND, &stack_prev);
+                    player.enqueue_equipment_change(
+                        &EquipmentSlot::OFF_HAND,
+                        ItemStack::EMPTY,
+                        &stack_prev,
+                    );
                 }
                 result
             } else if slot_index == 45 {
@@ -213,7 +218,11 @@ impl ScreenHandler for PlayerScreenHandler {
                     } else {
                         &slot_stack
                     };
-                    player.enqueue_equipment_change(&EquipmentSlot::OFF_HAND, remaining);
+                    player.enqueue_equipment_change(
+                        &EquipmentSlot::OFF_HAND,
+                        &stack_prev,
+                        remaining,
+                    );
                 }
                 result
             } else if (9..36).contains(&slot_index) {
@@ -316,7 +325,13 @@ mod tests {
         fn enqueue_property_packet(&self, _: &CSetContainerProperty, _: Option<WindowType>) {}
         fn enqueue_slot_set_packet(&self, _: &CSetPlayerInventory) {}
         fn enqueue_set_held_item_packet(&self, _: &CSetSelectedSlot) {}
-        fn enqueue_equipment_change(&self, _: &EquipmentSlot, _: &ItemStack) {}
+        fn enqueue_equipment_change(
+            &self,
+            _: &EquipmentSlot,
+            _previous: &ItemStack,
+            _: &ItemStack,
+        ) {
+        }
         fn award_experience(&self, _amount: i32) {}
         fn increment_stat(&self, _: StatisticCategory, _: i32, _: i32) {}
         fn play_block_sound(&self, _: Sound, _: f32) {}

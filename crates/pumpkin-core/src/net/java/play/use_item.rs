@@ -142,6 +142,7 @@ impl JavaClient {
             // Vanilla `Equippable.swapWithEquipmentSlot`
             player.increment_stat(StatisticCategory::Used, i32::from(held.item.id), 1);
 
+            let previous = current_equipped.clone();
             let equipped = if held.item_count <= 1 {
                 let swapped_to_eq = if gamemode == GameMode::Creative {
                     held.clone()
@@ -161,7 +162,7 @@ impl JavaClient {
                 swapped_to_eq
             };
 
-            player.enqueue_equipment_change(&slot, &equipped);
+            player.enqueue_equipment_change(&slot, &previous, &equipped);
             inventory
                 .entity_equipment
                 .lock()
