@@ -50,8 +50,13 @@ pub type SyncEntityChunk = Arc<ChunkEntityData>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadedChunkChange {
+    /// Read from disk (or published again while still held).
     Loaded(Vector2<i32>),
+    /// Generated now (Bukkit `isNewChunk`).
+    Generated(Vector2<i32>),
     Unloaded(Vector2<i32>),
+    /// Handed to the chunk writer.
+    Saved(Vector2<i32>),
 }
 
 pub type ChunkSaver = LevelFileIO<ChunkData>;

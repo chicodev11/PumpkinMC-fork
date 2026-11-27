@@ -91,12 +91,34 @@ pub struct GenerationSchedule {
 
 impl GenerationSchedule {
     fn publish_chunk(&self, pos: ChunkPos, chunk: SyncChunk) -> Option<SyncChunk> {
+        self.publish_chunk_as(pos, chunk, false)
+    }
+
+    /// `generated`: the chunk was generated now, not read from disk (Bukkit `isNewChunk`).
+    fn publish_chunk_as(
+        &self,
+        pos: ChunkPos,
+        chunk: SyncChunk,
+        generated: bool,
+    ) -> Option<SyncChunk> {
         let previous = self.public_chunk_map.insert(pos, chunk);
         if previous.is_none() {
-            self.loaded_chunk_changes
-                .push(LoadedChunkChange::Loaded(pos));
+            self.loaded_chunk_changes.push(if generated {
+                LoadedChunkChange::Generated(pos)
+            } else {
+                LoadedChunkChange::Loaded(pos)
+            });
         }
         previous
+    }
+
+    fn report_saved(&self, chunks: &[(ChunkPos, Chunk)]) {
+        for (pos, chunk) in chunks {
+            if matches!(chunk, Chunk::Level(_)) {
+                self.loaded_chunk_changes
+                    .push(LoadedChunkChange::Saved(*pos));
+            }
+        }
     }
 
     fn unpublish_chunk(&self, pos: ChunkPos) -> Option<SyncChunk> {
@@ -977,6 +999,7 @@ impl GenerationSchedule {
             *data.entry(*pos).or_insert(0) += 1;
         }
         drop(data);
+        self.report_saved(&chunks);
         if let Err(e) = self.io_write.blocking_send(chunks) {
             error!(
                 "Failed to send chunks to io write thread during save (may have shut down): {:?}",
@@ -1031,6 +1054,7 @@ impl GenerationSchedule {
             *data.entry(*pos).or_insert(0) += 1;
         }
         drop(data);
+        self.report_saved(&chunks);
 
         if let Err(e) = self.io_write.blocking_send(chunks) {
             error!("Failed to send chunks to io write thread: {:?}", e);
@@ -1170,7 +1194,7 @@ impl GenerationSchedule {
                                     holder.chunk = Some(Chunk::Level(chunk));
                                 } else {
                                     holder.chunk = Some(Chunk::Level(chunk));
-                                    let result = self.publish_chunk(new_pos, public_chunk);
+                                    let result = self.publish_chunk_as(new_pos, public_chunk, true);
                                     holder.public = true;
                                     if result.is_some() {
                                         warn!(

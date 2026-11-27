@@ -54,15 +54,10 @@ impl ToFromWasmEvent for ChunkLoad {
         let target_world = state
             .add(self.world.clone())
             .expect("failed to add world resource");
-
-        let (chunk_x, chunk_z) = self
-            .chunk
-            .try_read()
-            .map_or((0, 0), |guard| (guard.x, guard.z));
         Event::ChunkLoadEvent(ChunkLoadEventData {
             target_world,
-            chunk_x,
-            chunk_z,
+            chunk_x: self.chunk_pos.x,
+            chunk_z: self.chunk_pos.y,
             cancelled: self.cancelled,
         })
     }
@@ -71,31 +66,13 @@ impl ToFromWasmEvent for ChunkLoad {
         match event {
             Event::ChunkLoadEvent(data) => {
                 let world = consume_world(state, &data.target_world);
-                let chunk_data = pumpkin_world::chunk::ChunkData {
-                    section: pumpkin_world::chunk::ChunkSections::new(24, -64),
-                    heightmap: std::sync::Mutex::new(
-                        pumpkin_world::chunk::ChunkHeightmaps::default(),
-                    ),
-                    x: data.chunk_x,
-                    z: data.chunk_z,
-                    block_ticks: pumpkin_world::tick::scheduler::ChunkTickScheduler::default(),
-                    fluid_ticks: pumpkin_world::tick::scheduler::ChunkTickScheduler::default(),
-                    pending_block_entities: std::sync::Mutex::new(
-                        std::collections::HashMap::default(),
-                    ),
-                    light_engine: std::sync::Mutex::new(pumpkin_world::chunk::ChunkLight::default()),
-                    light_populated: std::sync::atomic::AtomicBool::new(false),
-                    status: pumpkin_data::chunk::ChunkStatus::Empty,
-                    blending_data: None,
-                    dirty: std::sync::atomic::AtomicBool::new(false),
-                    inhabited_time: std::sync::atomic::AtomicU64::new(0),
-                    custom_data: std::sync::Mutex::new(pumpkin_nbt::compound::NbtCompound::new()),
-                };
-                Self {
+                let mut event = Self::new(
                     world,
-                    chunk: Arc::new(tokio::sync::RwLock::new(chunk_data)),
-                    cancelled: data.cancelled,
-                }
+                    pumpkin_util::math::vector2::Vector2::new(data.chunk_x, data.chunk_z),
+                    false,
+                );
+                event.cancelled = data.cancelled;
+                event
             }
             _ => panic!("unexpected event type"),
         }
@@ -107,15 +84,10 @@ impl ToFromWasmEvent for ChunkSave {
         let target_world = state
             .add(self.world.clone())
             .expect("failed to add world resource");
-
-        let (chunk_x, chunk_z) = self
-            .chunk
-            .try_read()
-            .map_or((0, 0), |guard| (guard.x, guard.z));
         Event::ChunkSaveEvent(ChunkSaveEventData {
             target_world,
-            chunk_x,
-            chunk_z,
+            chunk_x: self.chunk_pos.x,
+            chunk_z: self.chunk_pos.y,
             cancelled: self.cancelled,
         })
     }
@@ -124,31 +96,12 @@ impl ToFromWasmEvent for ChunkSave {
         match event {
             Event::ChunkSaveEvent(data) => {
                 let world = consume_world(state, &data.target_world);
-                let chunk_data = pumpkin_world::chunk::ChunkData {
-                    section: pumpkin_world::chunk::ChunkSections::new(24, -64),
-                    heightmap: std::sync::Mutex::new(
-                        pumpkin_world::chunk::ChunkHeightmaps::default(),
-                    ),
-                    x: data.chunk_x,
-                    z: data.chunk_z,
-                    block_ticks: pumpkin_world::tick::scheduler::ChunkTickScheduler::default(),
-                    fluid_ticks: pumpkin_world::tick::scheduler::ChunkTickScheduler::default(),
-                    pending_block_entities: std::sync::Mutex::new(
-                        std::collections::HashMap::default(),
-                    ),
-                    light_engine: std::sync::Mutex::new(pumpkin_world::chunk::ChunkLight::default()),
-                    light_populated: std::sync::atomic::AtomicBool::new(false),
-                    status: pumpkin_data::chunk::ChunkStatus::Empty,
-                    blending_data: None,
-                    dirty: std::sync::atomic::AtomicBool::new(false),
-                    inhabited_time: std::sync::atomic::AtomicU64::new(0),
-                    custom_data: std::sync::Mutex::new(pumpkin_nbt::compound::NbtCompound::new()),
-                };
-                Self {
+                let mut event = Self::new(
                     world,
-                    chunk: Arc::new(tokio::sync::RwLock::new(chunk_data)),
-                    cancelled: data.cancelled,
-                }
+                    pumpkin_util::math::vector2::Vector2::new(data.chunk_x, data.chunk_z),
+                );
+                event.cancelled = data.cancelled;
+                event
             }
             _ => panic!("unexpected event type"),
         }

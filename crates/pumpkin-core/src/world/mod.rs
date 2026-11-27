@@ -1,4 +1,8 @@
 use crate::block::entities::{BlockEntity, block_entity_from_nbt};
+use crate::plugin::api::events::world::{
+    chunk_load::ChunkLoad, chunk_populate::ChunkPopulateEvent, chunk_save::ChunkSave,
+    chunk_unload::ChunkUnloadEvent,
+};
 use crossbeam::channel::Receiver;
 use dashmap::DashMap;
 use pumpkin_data::chunk::Biome;
@@ -310,6 +314,9 @@ pub struct World {
     /// another in `blockEntityTickers` order.
     pub block_entities: DashMap<Vector2<i32>, ChunkBlockEntities>,
     pending_block_entity_migrations: crossbeam::queue::SegQueue<Vector2<i32>>,
+    /// Chunk load/unload/save changes seen by `update_active_chunks`, fired as plugin events
+    /// from the tick (`fire_chunk_lifecycle_events`).
+    pending_chunk_events: crossbeam::queue::SegQueue<pumpkin_world::level::LoadedChunkChange>,
     /// Persistent custom data for the world (matching Bukkit's `PersistentDataHolder`)
     pub custom_data: std::sync::Mutex<NbtCompound>,
     /// Persistent custom data for block entities at specific positions
@@ -476,6 +483,7 @@ impl World {
             server,
             block_entities: DashMap::new(),
             pending_block_entity_migrations: crossbeam::queue::SegQueue::new(),
+            pending_chunk_events: crossbeam::queue::SegQueue::new(),
             custom_data: std::sync::Mutex::new(custom_data),
             custom_block_entity_data: DashMap::new(),
             encoded_chunk_cache: DashMap::new(),
@@ -636,9 +644,21 @@ impl World {
                 migrations.push(pos);
             }
         }
+        let fire_chunk_events = self.server.upgrade().is_some_and(|server| {
+            let plugins = &server.plugin_manager;
+            plugins.has_handlers::<ChunkLoad>()
+                || plugins.has_handlers::<ChunkPopulateEvent>()
+                || plugins.has_handlers::<ChunkUnloadEvent>()
+                || plugins.has_handlers::<ChunkSave>()
+        });
         for change in self.level.loaded_chunk_changes() {
+            if fire_chunk_events {
+                self.pending_chunk_events.push(change);
+            }
             match change {
-                pumpkin_world::level::LoadedChunkChange::Loaded(pos) => {
+                pumpkin_world::level::LoadedChunkChange::Saved(_) => {}
+                pumpkin_world::level::LoadedChunkChange::Loaded(pos)
+                | pumpkin_world::level::LoadedChunkChange::Generated(pos) => {
                     if active_chunks.contains(&pos)
                         && self.level.is_chunk_loaded(&pos)
                         && tracker.loaded_active_chunks.insert(pos)
@@ -1833,6 +1853,7 @@ impl World {
         });
         self.handling_tick.store(true, Ordering::Relaxed);
         self.update_active_chunks();
+        self.fire_chunk_lifecycle_events(server);
         self.process_poi_chunks();
         self.tick_environment();
         let mut raids = {
@@ -5190,6 +5211,7 @@ impl World {
                             .unwrap_or_else(std::sync::PoisonError::into_inner),
                     );
                     chunk.live.store(true, Relaxed);
+                    let mut loaded = 0;
                     for entity_nbt in &entity_nbts {
                         let Some(root) =
                             load_entity_from_nbt(entity_nbt, Vector3::default(), &world)
@@ -5211,8 +5233,11 @@ impl World {
                             // Tracker owns pairing (spawn packets + vehicle restore).
                             world.add_entity_silent(entity.clone());
                             player.try_restore_vehicle(&entity);
+                            loaded += 1;
                         }
                     }
+                    // Paper `EntitiesLoadEvent`: fired once per entity chunk, also when empty.
+                    world.load_entities(position, loaded);
                 } else {
                     // Already live for other watchers: pair this player now so
                     // spawn packets and vehicle restore do not wait on a tracker tick.
@@ -6117,6 +6142,18 @@ impl World {
             });
             new_entities
         });
+
+        // Paper `EntitiesUnloadEvent`, before the entities are saved and removed.
+        let mut unloading: FxHashMap<Vector2<i32>, usize> =
+            chunks_set.iter().map(|pos| (*pos, 0)).collect();
+        for entity in &entities_to_remove {
+            if let Some(count) = unloading.get_mut(&saved_chunk_pos(entity.as_ref())) {
+                *count += 1;
+            }
+        }
+        for (pos, count) in unloading {
+            self.unload_entities(pos, count);
+        }
 
         self.save_entities_by_chunk(&entities_to_remove, chunks_set.iter().copied())
             .await;
@@ -8704,23 +8741,38 @@ impl World {
             .is_some()
     }
 
-    pub fn populate_chunk(&self, chunk_pos: Vector2<i32>) {
-        let mut populate_event =
-            crate::plugin::api::events::world::chunk_populate::ChunkPopulateEvent::new(chunk_pos);
-        if let Some(server) = self.server.upgrade() {
-            server
-                .plugin_manager
-                .fire_blocking(&server, &mut populate_event);
-        }
-    }
-
-    pub fn unload_chunk(&self, chunk_pos: Vector2<i32>) {
-        let mut unload_event =
-            crate::plugin::api::events::world::chunk_unload::ChunkUnloadEvent::new(chunk_pos);
-        if let Some(server) = self.server.upgrade() {
-            server
-                .plugin_manager
-                .fire_blocking(&server, &mut unload_event);
+    /// Bukkit `ChunkLoadEvent` (with `isNewChunk`), `ChunkPopulateEvent` (after a new chunk
+    /// finished generating, right after its load event), `ChunkUnloadEvent` and Pumpkin's
+    /// `ChunkSave`, in the order the chunk system reported them. All are notifications:
+    /// cancelling does not stop the load, unload or save (Paper's are not cancellable).
+    fn fire_chunk_lifecycle_events(self: &Arc<Self>, server: &Arc<Server>) {
+        use pumpkin_world::level::LoadedChunkChange;
+        while let Some(change) = self.pending_chunk_events.pop() {
+            match change {
+                LoadedChunkChange::Loaded(pos) => {
+                    server
+                        .plugin_manager
+                        .fire_blocking(server, &mut ChunkLoad::new(self.clone(), pos, false));
+                }
+                LoadedChunkChange::Generated(pos) => {
+                    server
+                        .plugin_manager
+                        .fire_blocking(server, &mut ChunkLoad::new(self.clone(), pos, true));
+                    server
+                        .plugin_manager
+                        .fire_blocking(server, &mut ChunkPopulateEvent::new(pos));
+                }
+                LoadedChunkChange::Unloaded(pos) => {
+                    server
+                        .plugin_manager
+                        .fire_blocking(server, &mut ChunkUnloadEvent::new(pos));
+                }
+                LoadedChunkChange::Saved(pos) => {
+                    server
+                        .plugin_manager
+                        .fire_blocking(server, &mut ChunkSave::new(self.clone(), pos));
+                }
+            }
         }
     }
 
