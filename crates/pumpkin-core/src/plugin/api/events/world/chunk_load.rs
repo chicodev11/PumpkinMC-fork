@@ -3,9 +3,10 @@ use pumpkin_macros::{Event, cancellable};
 use pumpkin_util::math::vector2::Vector2;
 use std::sync::Arc;
 
-/// Bukkit `ChunkLoadEvent`: a chunk was loaded into a world (read from disk or newly
-/// generated). Fired on the tick thread once the chunk is in memory; cancelling it does not
-/// keep the chunk from loading (as on Paper).
+/// Bukkit `ChunkLoadEvent`: a chunk was loaded into a world.
+///
+/// Read from disk or newly generated. Fired on the tick thread once the chunk is in memory;
+/// cancelling it does not keep the chunk from loading (as on Paper).
 #[cancellable]
 #[derive(Event, Clone)]
 pub struct ChunkLoad {

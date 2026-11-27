@@ -53,11 +53,8 @@ async fn tick(server: &Arc<Server>, count: usize) {
     }
 }
 
-async fn run_inner(
-    server: &Arc<Server>,
-    bot: &mut HeadlessBot,
-    player: &Arc<pumpkin_core::entity::player::Player>,
-) -> Result<(), String> {
+/// The block as registered: its state, client state and hardness.
+fn check_registration() -> Result<pumpkin_data::BlockStateId, String> {
     let state = custom_block::resolve_state(BLOCK, [])
         .ok_or_else(|| format!("{BLOCK} is not registered"))?;
     if custom_block::client_state(state) != Block::STONE.default_state.id {
@@ -67,6 +64,15 @@ async fn run_inner(
     if (hardness - 1.5).abs() > f32::EPSILON {
         return Err(format!("{BLOCK} has hardness {hardness}, expected 1.5"));
     }
+    Ok(state)
+}
+
+async fn run_inner(
+    server: &Arc<Server>,
+    bot: &mut HeadlessBot,
+    player: &Arc<pumpkin_core::entity::player::Player>,
+) -> Result<(), String> {
+    let state = check_registration()?;
 
     player.set_gamemode(GameMode::Survival);
     let world = player.world();
@@ -154,11 +160,20 @@ async fn run_inner(
             "the drops callback gave {dropped:?}, expected one diamond"
         ));
     }
-    // MythicMobs-style drops: the plugin's death handler replaces a tagged zombie's drops.
+    check_death_drops(server, &world, pos, &area).await
+}
+
+/// MythicMobs-style drops: the plugin's death handler replaces a tagged zombie's drops.
+async fn check_death_drops(
+    server: &Arc<Server>,
+    world: &Arc<pumpkin_core::world::World>,
+    pos: BlockPos,
+    area: &BoundingBox,
+) -> Result<(), String> {
     let zombie = pumpkin_core::entity::r#type::from_type(
         &pumpkin_data::entity::EntityType::ZOMBIE,
         pos.to_centered_f64(),
-        &world,
+        world,
         uuid::Uuid::new_v4(),
     );
     zombie.get_entity().add_scoreboard_tag("addon_smoke_drops");
@@ -168,7 +183,7 @@ async fn run_inner(
     let mut emeralds = 0;
     for _ in 0..40 {
         tick(server, 1).await;
-        for entity in world.get_entities_at_box(&area) {
+        for entity in world.get_entities_at_box(area) {
             if let Some(item) = entity.get_item_entity() {
                 let stack = item
                     .get_item_stack()

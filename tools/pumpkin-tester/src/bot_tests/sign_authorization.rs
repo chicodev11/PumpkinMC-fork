@@ -153,7 +153,11 @@ async fn move_to_and_wait(
     Err(format!(
         "bot did not reach the requested position: target {target:?}, at {:?}, teleport pending {}, loaded {}, locked {}",
         player.get_entity().pos.load(),
-        player.awaiting_teleport.lock().unwrap().is_some(),
+        player
+            .awaiting_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some(),
         player.has_client_loaded(),
         player.is_movement_locked.load(Ordering::Relaxed)
     ))
