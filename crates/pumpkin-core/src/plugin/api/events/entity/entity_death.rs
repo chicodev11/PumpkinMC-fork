@@ -1,4 +1,6 @@
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
+use pumpkin_data::damage::DamageType;
 use pumpkin_macros::{Event, cancellable};
 use pumpkin_util::text::TextComponent;
 use std::sync::Arc;
@@ -8,6 +10,18 @@ use std::sync::Arc;
 pub struct EntityDeathEvent {
     /// The ID of the entity that died.
     pub entity_id: i32,
+
+    /// Bukkit `getEntity`: the entity that died (`None` only when rebuilt from a v0.1 plugin).
+    pub entity: Option<Arc<dyn EntityBase>>,
+
+    /// Paper `getDamageSource().getDamageType()`: the damage that killed it.
+    pub damage_type: DamageType,
+
+    /// Paper `getDamageSource().getDirectEntity()`: what hit it (an arrow, or the attacker).
+    pub direct_entity_id: Option<i32>,
+
+    /// Paper `getDamageSource().getCausingEntity()`: who is responsible (the shooter).
+    pub causing_entity_id: Option<i32>,
 
     /// The amount of experience dropped by the entity.
     pub dropped_exp: i32,
@@ -19,13 +33,20 @@ pub struct EntityDeathEvent {
 
 impl EntityDeathEvent {
     #[must_use]
-    pub const fn new(
-        entity_id: i32,
+    pub fn new(
+        entity: Arc<dyn EntityBase>,
+        damage_type: DamageType,
+        direct_entity_id: Option<i32>,
+        causing_entity_id: Option<i32>,
         dropped_exp: i32,
         drops: Vec<pumpkin_data::item_stack::ItemStack>,
     ) -> Self {
         Self {
-            entity_id,
+            entity_id: entity.get_entity().entity_id,
+            entity: Some(entity),
+            damage_type,
+            direct_entity_id,
+            causing_entity_id,
             dropped_exp,
             drops,
         }

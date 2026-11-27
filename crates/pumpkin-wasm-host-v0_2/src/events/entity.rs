@@ -126,6 +126,36 @@ impl ToFromWasmEvent for EntityDamageEvent {
     }
 }
 
+fn consume_drops(
+    state: &mut PluginHostState,
+    drops: &[wasmtime::component::Resource<crate::pumpkin::plugin::item_stack::ItemStack>],
+) -> Vec<pumpkin_data::item_stack::ItemStack> {
+    drops
+        .iter()
+        .filter_map(|item| {
+            state
+                .resource_table
+                .delete::<Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>>(
+                    wasmtime::component::Resource::new_own(item.rep()),
+                )
+                .ok()
+                .and_then(|stack| stack.try_lock().ok().map(|stack| stack.clone()))
+        })
+        .collect()
+}
+
+fn consume_entity(
+    state: &mut PluginHostState,
+    entity: &wasmtime::component::Resource<crate::pumpkin::plugin::entity::Entity>,
+) -> Option<Arc<dyn pumpkin_core::entity::EntityBase>> {
+    state
+        .resource_table
+        .delete::<Arc<dyn pumpkin_core::entity::EntityBase>>(
+            wasmtime::component::Resource::new_own(entity.rep()),
+        )
+        .ok()
+}
+
 impl ToFromWasmEvent for EntityDeathEvent {
     fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
         let drops = self
@@ -137,31 +167,40 @@ impl ToFromWasmEvent for EntityDeathEvent {
                     .expect("failed to add item stack resource")
             })
             .collect();
+        let entity = self
+            .entity
+            .clone()
+            .expect("a server-fired death event carries its entity");
         Event::EntityDeathEvent(EntityDeathEventData {
             entity_id: self.entity_id,
+            entity: state.add(entity).expect("failed to add entity resource"),
+            damage_type: to_wit_damage_type(&self.damage_type),
+            direct_entity_id: self.direct_entity_id,
+            causing_entity_id: self.causing_entity_id,
             dropped_exp: self.dropped_exp,
             drops,
         })
+    }
+
+    /// Only the drops and the experience can change; the entity and damage source stay.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        if let Event::EntityDeathEvent(data) = event {
+            let _ = consume_entity(state, &data.entity);
+            self.dropped_exp = data.dropped_exp;
+            self.drops = consume_drops(state, &data.drops);
+        }
     }
 
     fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
         match event {
             Event::EntityDeathEvent(data) => Self {
                 entity_id: data.entity_id,
+                entity: consume_entity(state, &data.entity),
+                damage_type: from_wit_damage_type(data.damage_type),
+                direct_entity_id: data.direct_entity_id,
+                causing_entity_id: data.causing_entity_id,
                 dropped_exp: data.dropped_exp,
-                drops: data
-                    .drops
-                    .iter()
-                    .filter_map(|item| {
-                        state
-                            .resource_table
-                            .delete::<Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>>(
-                                wasmtime::component::Resource::new_own(item.rep()),
-                            )
-                            .ok()
-                            .and_then(|stack| stack.try_lock().ok().map(|stack| stack.clone()))
-                    })
-                    .collect(),
+                drops: consume_drops(state, &data.drops),
             },
             _ => panic!("unexpected event type"),
         }
@@ -206,13 +245,26 @@ impl ToFromWasmEvent for EntitySpawnEvent {
             .add(self.world.clone())
             .expect("failed to add world resource");
 
+        let entity = self
+            .entity
+            .clone()
+            .expect("a server-fired spawn event carries its entity");
         Event::EntitySpawnEvent(EntitySpawnEventData {
             entity_id: self.entity_id,
+            entity: state.add(entity).expect("failed to add entity resource"),
             entity_type: self.entity_type.clone(),
             position: to_wasm_position(self.position),
             target_world,
             cancelled: self.cancelled,
         })
+    }
+
+    /// Only `cancelled` can change.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        cleanup_event(&event, state);
+        if let Event::EntitySpawnEvent(data) = event {
+            self.cancelled = data.cancelled;
+        }
     }
 
     fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
@@ -221,6 +273,7 @@ impl ToFromWasmEvent for EntitySpawnEvent {
                 let world = consume_world(state, &data.target_world);
                 Self {
                     entity_id: data.entity_id,
+                    entity: consume_entity(state, &data.entity),
                     entity_type: data.entity_type,
                     position: pumpkin_util::math::vector3::Vector3::new(
                         data.position.0,
@@ -718,8 +771,13 @@ impl ToFromWasmEvent for CreatureSpawnEvent {
                 .add(player.clone())
                 .expect("failed to add player resource")
         });
+        let entity = self
+            .entity
+            .clone()
+            .expect("a server-fired spawn event carries its entity");
         Event::CreatureSpawnEvent(CreatureSpawnEventData {
             entity_id: self.entity_id,
+            entity: state.add(entity).expect("failed to add entity resource"),
             entity_type: self.entity_type.clone(),
             position: to_wasm_position(self.position),
             target_world,
@@ -740,6 +798,7 @@ impl ToFromWasmEvent for CreatureSpawnEvent {
         match event {
             Event::CreatureSpawnEvent(data) => Self {
                 entity_id: data.entity_id,
+                entity: consume_entity(state, &data.entity),
                 entity_type: data.entity_type,
                 position: from_wasm_position(data.position),
                 world: consume_world(state, &data.target_world),

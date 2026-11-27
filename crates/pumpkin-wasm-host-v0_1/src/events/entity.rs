@@ -141,10 +141,21 @@ impl ToFromWasmEvent for EntityDeathEvent {
         })
     }
 
+    /// WIT v0.1 has no entity or damage source: only the drops and experience come back.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        let rebuilt = Self::from_wasm_event(event, state);
+        self.dropped_exp = rebuilt.dropped_exp;
+        self.drops = rebuilt.drops;
+    }
+
     fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
         match event {
             Event::EntityDeathEvent(data) => Self {
                 entity_id: data.entity_id,
+                entity: None,
+                damage_type: pumpkin_data::damage::DamageType::GENERIC,
+                direct_entity_id: None,
+                causing_entity_id: None,
                 dropped_exp: data.dropped_exp,
                 drops: data
                     .drops
@@ -212,12 +223,18 @@ impl ToFromWasmEvent for EntitySpawnEvent {
         })
     }
 
+    /// Only `cancelled` comes back; the entity stays.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        self.cancelled = Self::from_wasm_event(event, state).cancelled;
+    }
+
     fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
         match event {
             Event::EntitySpawnEvent(data) => {
                 let world = consume_world(state, &data.target_world);
                 Self {
                     entity_id: data.entity_id,
+                    entity: None,
                     entity_type: data.entity_type,
                     position: pumpkin_util::math::vector3::Vector3::new(
                         data.position.0,
@@ -715,6 +732,7 @@ impl ToFromWasmEvent for CreatureSpawnEvent {
         match event {
             Event::CreatureSpawnEvent(data) => Self {
                 entity_id: data.entity_id,
+                entity: None,
                 entity_type: data.entity_type,
                 position: from_wasm_position(data.position),
                 world: consume_world(state, &data.target_world),

@@ -5952,9 +5952,7 @@ impl World {
     /// [`EntitySpawnEvent`]: crate::plugin::api::events::entity::entity_spawn::EntitySpawnEvent
     pub fn spawn_entity(self: &Arc<Self>, entity: Arc<dyn EntityBase>) -> bool {
         let mut event = crate::plugin::api::events::entity::entity_spawn::EntitySpawnEvent::new(
-            entity.get_entity().entity_id,
-            entity.get_entity().entity_type.id.to_string(),
-            entity.get_entity().pos.load(),
+            entity.clone(),
             self.clone(),
         );
         if let Some(server) = self.server.upgrade() {
@@ -5978,11 +5976,8 @@ impl World {
         reason: crate::plugin::api::events::entity::creature_spawn::CreatureSpawnReason,
         player: Option<Arc<Player>>,
     ) -> bool {
-        let base = entity.get_entity();
         let mut event = crate::plugin::api::events::entity::creature_spawn::CreatureSpawnEvent::new(
-            base.entity_id,
-            base.entity_type.resource_name.to_string(),
-            base.pos.load(),
+            entity.clone(),
             self.clone(),
             reason,
             player,

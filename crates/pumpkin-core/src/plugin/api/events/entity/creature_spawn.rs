@@ -1,3 +1,4 @@
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::world::World;
 use pumpkin_macros::{Event, cancellable};
@@ -25,6 +26,10 @@ pub struct CreatureSpawnEvent {
 
     /// The player who caused the spawn, `None` for other sources such as a dispenser.
     pub player: Option<Arc<Player>>,
+
+    /// Bukkit `getEntity`: the creature about to be added (`None` only when rebuilt from a
+    /// v0.1 plugin).
+    pub entity: Option<Arc<dyn EntityBase>>,
 }
 
 /// Why a creature spawned, sent to plugins as [`CreatureSpawnReason::as_str`].
@@ -51,20 +56,20 @@ impl CreatureSpawnReason {
 impl CreatureSpawnEvent {
     #[must_use]
     pub fn new(
-        entity_id: i32,
-        entity_type: String,
-        position: Vector3<f64>,
+        entity: Arc<dyn EntityBase>,
         world: Arc<World>,
         spawn_reason: CreatureSpawnReason,
         player: Option<Arc<Player>>,
     ) -> Self {
+        let base = entity.get_entity();
         Self {
-            entity_id,
-            entity_type,
-            position,
+            entity_id: base.entity_id,
+            entity_type: base.entity_type.resource_name.to_string(),
+            position: base.pos.load(),
             world,
             spawn_reason: spawn_reason.as_str().to_string(),
             player,
+            entity: Some(entity),
             cancelled: false,
         }
     }

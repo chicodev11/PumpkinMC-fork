@@ -6,7 +6,7 @@ interface event {
     use screens.{screen};
     use player.{player, java-minecraft-version, bedrock-minecraft-version, merchant-trade};
     use text.{text-component};
-    use %world.{%world};
+    use %world.{%world, entity};
     use java-packets.{serverbound-packet as java-serverbound-packet, clientbound-packet as java-clientbound-packet};
     use bedrock-packets.{serverbound-packet as bedrock-serverbound-packet, clientbound-packet as bedrock-clientbound-packet};
     use uuid.{uuid};
@@ -488,6 +488,14 @@ interface event {
 
     record entity-death-event-data {
         entity-id: s32,
+        /// The entity that died (Bukkit `getEntity`). Read-only.
+        entity: entity,
+        /// What killed it (Paper `getDamageSource`). Read-only.
+        damage-type: damage-type,
+        /// The entity that hit directly (`DamageSource.getDirectEntity`): an arrow or the attacker.
+        direct-entity-id: option<s32>,
+        /// The entity responsible (`DamageSource.getCausingEntity`): a projectile's shooter.
+        causing-entity-id: option<s32>,
         dropped-exp: s32,
         /// What the entity drops (loot, equipment, inventory); plugins may change the list.
         drops: list<item-stack>
@@ -503,6 +511,9 @@ interface event {
 
     record entity-spawn-event-data {
         entity-id: s32,
+        /// The entity about to be added (Bukkit `getEntity`). Read-only.
+        entity: entity,
+        /// The entity type's numeric registry id, as a string.
         entity-type: string,
         position: position,
         target-world: %world,
@@ -646,6 +657,8 @@ interface event {
 
     record creature-spawn-event-data {
         entity-id: s32,
+        /// The creature about to be added (Bukkit `getEntity`). Read-only.
+        entity: entity,
         entity-type: string,
         position: position,
         target-world: %world,

@@ -250,13 +250,19 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
             cleanup_world(state, &data.target_world);
         }
         Event::EntityDamageEvent(_) => {}
-        Event::EntityDeathEvent(_) => {}
+        Event::EntityDeathEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            for item in &data.drops {
+                cleanup_item_stack(state, item);
+            }
+        }
         Event::PlayerDeathEvent(data) => {
             cleanup_player(state, &data.player);
             cleanup_text_component(state, &data.death_message);
         }
         Event::EntitySpawnEvent(data) => {
             cleanup_world(state, &data.target_world);
+            cleanup_entity(state, &data.entity);
         }
         Event::EntityCombustEvent(_) => {}
         Event::EntityRegainHealthEvent(_) => {}
@@ -548,6 +554,7 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
         }
         Event::CreatureSpawnEvent(data) => {
             cleanup_world(state, &data.target_world);
+            cleanup_entity(state, &data.entity);
             if let Some(res) = &data.player {
                 cleanup_player(state, res);
             }

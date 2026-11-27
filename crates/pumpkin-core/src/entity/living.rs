@@ -2966,7 +2966,10 @@ impl LivingEntity {
                     .unwrap_or_default();
                 let mut death_event =
                     crate::plugin::api::events::entity::entity_death::EntityDeathEvent::new(
-                        self.entity.entity_id,
+                        dyn_self.clone(),
+                        damage_type,
+                        source.map(|entity| entity.get_entity().entity_id),
+                        cause.map(|entity| entity.get_entity().entity_id),
                         i32::try_from(experience).unwrap_or(i32::MAX),
                         drops,
                     );
