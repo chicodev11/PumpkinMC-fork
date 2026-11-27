@@ -335,9 +335,7 @@ impl SnifferEntity {
                 this_entity: Some(self),
                 ..Default::default()
             };
-            for stack in
-                crate::world::loot::generate_loot_from_handle(&table, rand::random(), &params)
-            {
+            for stack in crate::world::loot::generate_loot_from_handle(&table, 0, &params) {
                 let item = ItemEntity::new(
                     Entity::new(world.clone(), head.0.to_f64(), &EntityType::ITEM),
                     stack,

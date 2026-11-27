@@ -51,7 +51,7 @@ impl crate::block::BlockBehaviour for PumpkinBlock {
                         tool: Some(args.item_stack.clone()),
                         ..Default::default()
                     };
-                    crate::world::loot::generate_loot_from_handle(&handle, rand::random(), &params)
+                    crate::world::loot::generate_loot_from_handle(&handle, 0, &params)
                 },
             );
         for drop_stack in drops {

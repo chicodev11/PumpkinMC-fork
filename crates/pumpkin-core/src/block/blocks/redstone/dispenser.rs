@@ -1117,9 +1117,7 @@ impl DispenserBlock {
                 tool: Some(tool.clone()),
                 ..Default::default()
             };
-            for stack in
-                crate::world::loot::generate_loot_from_handle(&table, rand::random(), &params)
-            {
+            for stack in crate::world::loot::generate_loot_from_handle(&table, 0, &params) {
                 Self::drop_at(ctx.world, target.to_centered_f64(), stack);
             }
         }

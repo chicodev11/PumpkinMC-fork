@@ -41,6 +41,7 @@ use pumpkin_data::{
 };
 use pumpkin_util::loot_table::parser::parse_loot_table;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::random::xoroshiro128::Xoroshiro;
 
 fn assert_drops(
     key: &str,
@@ -544,7 +545,11 @@ async fn enchanted_count_uses_the_attackers_allowed_equipment_and_float_rounding
     };
     let table = parse_loot_table(r#"{"pools":[{"entries":[{"type":"minecraft:item","name":"minecraft:diamond","modifier":[{"type":"minecraft:set_count","count":0},{"type":"minecraft:enchanted_count_increase","enchantment":"minecraft:looting","count":{"type":"minecraft:uniform","min":0.0,"max":1.0}}]}]}]}"#).unwrap();
     let mut bins = [0; 4];
-    for seed in 0..4096 {
+    // Spread seeds: `RandomSource.create` (Java `Random`) correlates the first float of
+    // consecutive seeds.
+    let mut seeds = Xoroshiro::from_seed(1);
+    for _ in 0..4096 {
+        let seed = seeds.next_i64() | 1;
         let drops = generate_dynamic_loot_with_context(&table, seed, &params);
         let count = drops
             .first()
@@ -715,7 +720,7 @@ async fn double_plants_keep_their_adjacent_half_location_checks() {
 #[test]
 fn negative_uniform_bonus_multiplier_keeps_the_base_count() {
     for seed in 0..32 {
-        let mut rng = Xoroshiro::from_seed(seed);
+        let mut rng = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
         assert_eq!(
             apply_bonus_formula(2, LootBonusFormula::UniformBonusCount(-3), 3, &mut rng),
             2
@@ -988,7 +993,7 @@ fn loot_fill_skips_occupied_slots() {
         ItemStack::EMPTY.clone(),
         ItemStack::EMPTY.clone(),
     ];
-    place_items_in_slots(&mut slots, vec![ItemStack::new(1, &Item::STONE)], 1);
+    place_items_in_slots(&mut slots, vec![ItemStack::new(1, &Item::STONE)].into());
     assert_eq!(slots[0].item.id, Item::DIAMOND.id);
     assert_eq!(slots[0].item_count, 8);
     let placed = slots
@@ -1010,7 +1015,7 @@ fn unpack_loot_into_slots_preserves_concurrent_inserts() {
     ]);
     let key = unpack_loot_into_slots(&loot_table, 1, &items, |key, _seed| {
         assert_eq!(key, "minecraft:chests/simple_dungeon");
-        vec![ItemStack::new(1, &Item::STONE)]
+        vec![ItemStack::new(1, &Item::STONE)].into()
     });
     assert_eq!(key.as_deref(), Some("minecraft:chests/simple_dungeon"));
     assert!(loot_table.lock().unwrap().is_none());
@@ -1025,7 +1030,7 @@ fn unpack_loot_into_slots_preserves_concurrent_inserts() {
     );
     assert!(
         unpack_loot_into_slots(&loot_table, 1, &items, |_, _| {
-            vec![ItemStack::new(1, &Item::GOLD_INGOT)]
+            vec![ItemStack::new(1, &Item::GOLD_INGOT)].into()
         })
         .is_none()
     );
@@ -1036,4 +1041,22 @@ fn unpack_loot_into_slots_preserves_concurrent_inserts() {
             .iter()
             .all(|stack| stack.item.id != Item::GOLD_INGOT.id)
     );
+}
+
+#[test]
+fn vanilla_tables_roll_from_their_random_sequence() {
+    let handle = get_loot_table("blocks/stone").unwrap();
+    assert_eq!(handle.random_sequence(), Some("minecraft:blocks/stone"));
+    let parsed = parse_loot_table(r#"{"pools":[],"random_sequence":"minecraft:custom"}"#).unwrap();
+    assert_eq!(parsed.random_sequence.as_deref(), Some("minecraft:custom"));
+    // A non-zero seed is vanilla `RandomSource.create(seed)`: the same seed rolls the same loot.
+    let table = parse_loot_table(r#"{"pools":[{"rolls":{"type":"minecraft:uniform","min":1,"max":64},"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#).unwrap();
+    let params = LootContextParameters::default();
+    let count = |seed| {
+        generate_dynamic_loot_with_context(&table, seed, &params)
+            .iter()
+            .map(|stack| u32::from(stack.item_count))
+            .sum::<u32>()
+    };
+    assert_eq!(count(12345), count(12345));
 }

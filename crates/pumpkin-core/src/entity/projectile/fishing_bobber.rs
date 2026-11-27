@@ -106,9 +106,12 @@ impl FishingBobberEntity {
                     s.datapack_manager
                         .get_loot_table("minecraft:gameplay/fishing")
                 })
-                .unwrap_or(LootTableHandle::Static(
-                    &pumpkin_data::loot_table::GAMEPLAY_FISHING,
-                ));
+                .unwrap_or_else(|| {
+                    LootTableHandle::vanilla(
+                        &pumpkin_data::loot_table::GAMEPLAY_FISHING,
+                        "minecraft:gameplay/fishing",
+                    )
+                });
             let items = generate_loot_from_handle(&handle, 0, &params);
             let delta = player_pos - bobber_pos;
             let vy = delta.y * 0.1 + delta.length().sqrt() * 0.08;

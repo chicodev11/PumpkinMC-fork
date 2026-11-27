@@ -6641,7 +6641,8 @@ impl World {
         let Some(loot_table) = block.loot_table.and_then(|key| self.get_loot_table(key)) else {
             return Vec::new();
         };
-        let seed: i64 = rand::random();
+        // Vanilla `getRandomItems(params)`: the table's random sequence rolls.
+        let seed = 0;
         let params = crate::world::loot::LootContextParameters {
             world: Some(self),
             tool: Some(tool.unwrap_or_else(|| ItemStack::EMPTY.clone())),
@@ -8814,7 +8815,7 @@ impl World {
                 };
                 pumpkin_data::loot_table::get_loot_table(key)
                     .or_else(|| pumpkin_data::loot_table::get_loot_table(&full_key))
-                    .map(crate::world::loot::LootTableHandle::Static)
+                    .map(|table| crate::world::loot::LootTableHandle::vanilla(table, &full_key))
             },
             |server| server.datapack_manager.get_loot_table(key),
         )

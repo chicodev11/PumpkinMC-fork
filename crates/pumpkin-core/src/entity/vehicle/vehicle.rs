@@ -188,12 +188,11 @@ impl VehicleEntity {
                 world.drop_stack(&self.entity.block_pos.load(), stack);
                 return;
             }
-            if let Some(loot_table) = pumpkin_data::loot_table::get_loot_table(&key) {
+            if let Some(loot_table) = world.get_loot_table(&key) {
                 let pos = self.entity.block_pos.load();
-                let seed: i64 = rand::random();
-                for stack in crate::world::loot::generate_loot_with_context(
-                    loot_table,
-                    seed,
+                for stack in crate::world::loot::generate_loot_from_handle(
+                    &loot_table,
+                    0,
                     &crate::world::loot::LootContextParameters {
                         world: Some(&world),
                         ..Default::default()

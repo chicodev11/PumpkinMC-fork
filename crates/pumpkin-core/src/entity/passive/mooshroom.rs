@@ -247,8 +247,7 @@ impl Shearable for MooshroomEntity {
                     ..Default::default()
                 };
                 let drop_pos = Vector3::new(pos.x, entity.get_y(1.0), pos.z);
-                for stack in generate_loot_from_handle(&table, self.get_random().random(), &params)
-                {
+                for stack in generate_loot_from_handle(&table, 0, &params) {
                     for _ in 0..stack.item_count {
                         let item_entity = ItemEntity::new(
                             Entity::new(world.clone(), drop_pos, &EntityType::ITEM),

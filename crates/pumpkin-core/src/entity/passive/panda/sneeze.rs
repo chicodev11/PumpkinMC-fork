@@ -105,7 +105,8 @@ impl PandaEntity {
             }
         }
 
-        self.drop_sneeze_gift(self.get_random().random());
+        // Vanilla `dropFromGiftLootTable`: no seed, so the table's random sequence rolls.
+        self.drop_sneeze_gift(0);
     }
 
     fn roll_sneeze_gift(&self, seed: i64) -> Vec<ItemStack> {
@@ -257,7 +258,7 @@ mod tests {
         let folder = tempfile::tempdir()?;
         let world = world(&folder);
         let panda = spawn_panda(&world, 0.5, 0.5);
-        let winning_seed = (0..100_000)
+        let winning_seed = (1..100_000)
             .find(|seed| !panda.roll_sneeze_gift(*seed).is_empty())
             .ok_or("no seed wins the gift")?;
         let gift = panda.roll_sneeze_gift(winning_seed);

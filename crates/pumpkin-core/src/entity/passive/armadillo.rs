@@ -241,9 +241,7 @@ impl ArmadilloEntity {
                 tool: Some(tool.clone()),
                 ..Default::default()
             };
-            for drop_stack in
-                crate::world::loot::generate_loot_from_handle(&table, rand::random(), &params)
-            {
+            for drop_stack in crate::world::loot::generate_loot_from_handle(&table, 0, &params) {
                 let item_entity = Arc::new(ItemEntity::new(
                     Entity::new(world.clone(), pos, &EntityType::ITEM),
                     drop_stack,
@@ -304,8 +302,7 @@ impl ArmadilloEntity {
                 this_entity: Some(self),
                 ..Default::default()
             };
-            let drops =
-                crate::world::loot::generate_loot_from_handle(&table, rand::random(), &params);
+            let drops = crate::world::loot::generate_loot_from_handle(&table, 0, &params);
             if !drops.is_empty() {
                 let mut rng = self.get_random();
                 let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.2, 1.0);

@@ -16,7 +16,9 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::RandomImpl;
 use serde_json::Value;
 
-use super::{EntityBase, LootContextParameters, LootEntityTarget, Taggable, World, Xoroshiro};
+use super::{
+    EntityBase, LootContextParameters, LootEntityTarget, RandomGenerator, Taggable, World,
+};
 
 pub(super) fn matches_entity(
     target: LootEntityTarget,
@@ -946,7 +948,7 @@ pub(super) fn matches_value(
     value: LootNumberProvider,
     range: &Value,
     _params: &LootContextParameters<'_>,
-    rng: &mut Xoroshiro,
+    rng: &mut RandomGenerator,
 ) -> bool {
     let num = match value {
         LootNumberProvider::Constant(c) => c as f32,

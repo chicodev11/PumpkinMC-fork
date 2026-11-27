@@ -51,7 +51,7 @@ impl CaveVinesBlock {
                         this_entity: Some(player as &dyn crate::entity::EntityBase),
                         ..Default::default()
                     };
-                    crate::world::loot::generate_loot_from_handle(&handle, rand::random(), &params)
+                    crate::world::loot::generate_loot_from_handle(&handle, 0, &params)
                 },
             );
         for stack in drops {

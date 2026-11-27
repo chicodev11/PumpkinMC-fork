@@ -38,7 +38,7 @@ use crate::entity::passive::tamable::TamableAnimal;
 use crate::entity::player::Player;
 use crate::plugin::api::events::world::loot_generate::LootGenerateEvent;
 use crate::world::World;
-use crate::world::loot::{LootContextParameters, generate_loot_from_handle};
+use crate::world::loot::{LootContextParameters, LootRoll, roll_loot};
 use pumpkin_data::BlockState;
 
 struct ChestScreenFactory {
@@ -455,15 +455,17 @@ fn unpack_loot_table(world: &World, entity: &Arc<dyn BlockEntity>, player: Optio
                 },
             );
         }
-        let items = generate_chest_loot(world, entity, player, &loot_key, seed);
-        {
+        let mut roll = generate_chest_loot(world, entity, player, &loot_key, seed);
+        let items = std::mem::take(&mut roll.items);
+        roll.items = {
             let _dispatch = LootEventDispatch::enter(chest);
             match world.plugin_event(|| LootGenerateEvent::with_items(loot_key.clone(), items.clone())) {
                 Some(event) if event.cancelled => Vec::new(),
                 Some(event) => event.items,
                 None => items,
             }
-        }
+        };
+        roll
     });
 }
 
@@ -473,10 +475,10 @@ fn generate_chest_loot(
     player: Option<&Player>,
     loot_key: &str,
     seed: i64,
-) -> Vec<ItemStack> {
+) -> LootRoll {
     // Vanilla resolves an unknown key to `LootTable.EMPTY`: the key is cleared, nothing is placed.
     let Some(table) = world.get_loot_table(loot_key) else {
-        return Vec::new();
+        return Vec::new().into();
     };
     let params = LootContextParameters {
         world: Some(world),
@@ -490,7 +492,7 @@ fn generate_chest_loot(
         }),
         ..Default::default()
     };
-    generate_loot_from_handle(&table, seed, &params)
+    roll_loot(&table, seed, &params)
 }
 
 /// Vanilla `ChestBlock.getContainer` with `ignoreBeingBlocked = true`: a double chest is one container.

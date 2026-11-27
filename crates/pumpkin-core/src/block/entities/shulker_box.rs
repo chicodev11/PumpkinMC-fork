@@ -69,7 +69,10 @@ impl BlockEntity for ShulkerBoxBlockEntity {
         shulker_box
     }
 
-    fn unpack_loot_table_with(&self, generate: &mut dyn FnMut(String, i64) -> Vec<ItemStack>) {
+    fn unpack_loot_table_with(
+        &self,
+        generate: &mut dyn FnMut(String, i64) -> crate::world::loot::LootRoll,
+    ) {
         if crate::world::loot::unpack_loot_into_slots(
             &self.loot_table,
             self.loot_table_seed,

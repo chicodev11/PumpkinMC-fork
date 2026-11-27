@@ -780,7 +780,7 @@ impl VaultBlockEntity {
         };
         let items = generate_loot_from_handle(
             &handle,
-            rand::random(),
+            0,
             &LootContextParameters {
                 world: Some(world),
                 position: Some(self.position.to_centered_f64()),

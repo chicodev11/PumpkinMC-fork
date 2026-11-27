@@ -374,7 +374,11 @@ impl Server {
             command_storage: std::sync::Mutex::new(std::collections::HashMap::new()),
             stopwatches: std::sync::Mutex::new(crate::world::stopwatches::Stopwatches::new()),
             random_sequences: std::sync::Mutex::new(
-                crate::world::random_sequences::RandomSequences::new(),
+                pumpkin_world::world_info::data_files::read_random_sequences(&world_path)
+                    .map_or_else(
+                        crate::world::random_sequences::RandomSequences::new,
+                        |data| crate::world::random_sequences::RandomSequences::from_nbt(&data),
+                    ),
             ),
             advancement_manager,
             white_list,
@@ -729,8 +733,28 @@ impl Server {
             });
         }
         let level_data = self.level_info.load();
+        let world_path = self.basic_config.get_world_path();
         self.world_info_writer
-            .write_world_info(&level_data, &self.basic_config.get_world_path())
+            .write_world_info(&level_data, &world_path)?;
+        self.save_random_sequences(&world_path, level_data.data_version)
+    }
+
+    /// Vanilla saves `RandomSequences` with the other server saved data.
+    fn save_random_sequences(
+        &self,
+        world_path: &std::path::Path,
+        data_version: i32,
+    ) -> Result<(), WorldInfoError> {
+        let data = self
+            .random_sequences
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .to_nbt();
+        pumpkin_world::world_info::data_files::write_random_sequences(
+            world_path,
+            data,
+            data_version,
+        )
     }
 
     pub fn reload_datapacks(&self, server: &Arc<Self>) {
@@ -1045,6 +1069,11 @@ impl Server {
             .write_world_info(&level_data, &self.basic_config.get_world_path())
         {
             error!("Failed to save level.dat: {err}");
+        }
+        if let Err(err) =
+            self.save_random_sequences(&self.basic_config.get_world_path(), level_data.data_version)
+        {
+            error!("Failed to save random_sequences.dat: {err}");
         }
         info!("Completed worlds");
     }

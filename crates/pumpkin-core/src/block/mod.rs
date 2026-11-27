@@ -552,8 +552,8 @@ pub fn collect_loot(
         }
         return Vec::new();
     };
-    // Note (RNG source, FORK_TODO): vanilla rolls from the loot table's `random_sequence`, which is seeded per world.
-    let seed: i64 = rand::random();
+    // Vanilla `getRandomItems(params)`: no seed, so the table's random sequence rolls.
+    let seed = 0;
     let params = LootContextParameters {
         world: Some(world),
         tool: Some(

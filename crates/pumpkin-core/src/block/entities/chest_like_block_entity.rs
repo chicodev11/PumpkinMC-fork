@@ -157,7 +157,7 @@ macro_rules! impl_block_entity_for_chest {
 
             fn unpack_loot_table_with(
                 &self,
-                generate: &mut dyn FnMut(String, i64) -> Vec<ItemStack>,
+                generate: &mut dyn FnMut(String, i64) -> $crate::world::loot::LootRoll,
             ) {
                 if $crate::world::loot::unpack_loot_into_slots(
                     &self.loot_table,
@@ -563,6 +563,7 @@ mod tests {
                 ItemStack::new(1, &Item::STONE),
                 ItemStack::new(1, &Item::DIRT),
             ]
+            .into()
         });
         assert_eq!(chest.get_stack(0).item.id, Item::DIAMOND.id);
         let placed: Vec<_> = (1..ChestBlockEntity::INVENTORY_SIZE)
@@ -582,7 +583,9 @@ mod tests {
                 .is_none()
         );
 
-        chest.unpack_loot_table_with(&mut |_key, _seed| vec![ItemStack::new(1, &Item::GOLD_INGOT)]);
+        chest.unpack_loot_table_with(&mut |_key, _seed| {
+            vec![ItemStack::new(1, &Item::GOLD_INGOT)].into()
+        });
         assert_eq!(chest.get_stack(0).item.id, Item::DIAMOND.id);
         assert!(
             (0..ChestBlockEntity::INVENTORY_SIZE)

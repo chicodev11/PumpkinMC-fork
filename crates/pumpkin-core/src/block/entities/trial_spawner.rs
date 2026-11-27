@@ -217,8 +217,9 @@ impl SpawnData {
         else {
             return;
         };
+        // Vanilla `EquipmentUser.equip` passes seed 0: the table's random sequence rolls.
         let items = loot_table.generate_loot_with_context(
-            rand::random::<i64>(),
+            0,
             &crate::world::loot::LootContextParameters {
                 world: Some(world),
                 this_entity: Some(entity),
@@ -1414,9 +1415,8 @@ impl TrialSpawner {
         if let Some(key) = ejecting_loot_table
             && let Some(loot_table) = world.get_loot_table(key)
         {
-            let seed = rand::random::<i64>();
             let items = loot_table.generate_loot_with_context(
-                seed,
+                0,
                 &crate::world::loot::LootContextParameters {
                     world: Some(world),
                     ..Default::default()

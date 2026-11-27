@@ -657,6 +657,29 @@ pub fn write_scheduled_events_stub(
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
 }
 
+/// The `data` compound of `random_sequences.dat`, if the file exists and reads.
+#[must_use]
+pub fn read_random_sequences(level_folder: &Path) -> Option<NbtCompound> {
+    let path = minecraft_data_dir(level_folder).join("random_sequences.dat");
+    let root = read_gzip_compound_tag(File::open(path).ok()?).ok()?;
+    root.get_compound("data").cloned()
+}
+
+/// Writes vanilla `random_sequences.dat` with `data` from `RandomSequences`.
+pub fn write_random_sequences(
+    level_folder: &Path,
+    data: NbtCompound,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let dir = ensure_minecraft_data_dir(level_folder)?;
+    let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data_version);
+    root.put_compound("data", data);
+    let file = File::create(dir.join("random_sequences.dat"))?;
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
 pub fn write_random_sequences_stub(
     level_folder: &Path,
     data_version: i32,

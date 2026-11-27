@@ -63,11 +63,7 @@ impl BlockBehaviour for SweetBerryBushBlock {
                                 ),
                                 ..Default::default()
                             };
-                            crate::world::loot::generate_loot_from_handle(
-                                &handle,
-                                rand::random(),
-                                &params,
-                            )
+                            crate::world::loot::generate_loot_from_handle(&handle, 0, &params)
                         },
                     );
                 if let Some(player_arc) = args.world.get_player_by_uuid(args.player.gameprofile.id)

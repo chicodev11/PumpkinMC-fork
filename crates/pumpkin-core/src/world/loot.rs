@@ -12,7 +12,7 @@ pub use pumpkin_util::loot_table::{
     LootEntry, LootEntryKind, LootFunction, LootFunctionKind, LootNumberProvider, LootPool,
     LootTable,
 };
-use pumpkin_util::random::{RandomImpl, xoroshiro128::Xoroshiro};
+use pumpkin_util::random::{RandomGenerator, RandomImpl, legacy_rand::LegacyRand};
 
 mod generation;
 mod predicates;
@@ -129,7 +129,7 @@ fn check_dynamic_condition(
     has_silk_touch: bool,
     has_shears: bool,
     params: &LootContextParameters,
-    rng: &mut Xoroshiro,
+    rng: &mut RandomGenerator,
 ) -> bool {
     match cond {
         DynamicLootCondition::None => true,
@@ -226,7 +226,7 @@ fn check_condition(
     has_silk_touch: bool,
     has_shears: bool,
     params: &LootContextParameters,
-    rng: &mut Xoroshiro,
+    rng: &mut RandomGenerator,
 ) -> bool {
     match cond {
         LootCondition::None => true,
@@ -322,7 +322,7 @@ fn apply_bonus_formula(
     base_count: i32,
     bonus: LootBonusFormula,
     fortune_level: i32,
-    rng: &mut Xoroshiro,
+    rng: &mut RandomGenerator,
 ) -> i32 {
     match bonus {
         LootBonusFormula::OreDrops => {
@@ -366,7 +366,8 @@ pub fn generate_loot_with_context(
     seed: i64,
     params: &LootContextParameters<'_>,
 ) -> Vec<ItemStack> {
-    generation::generate(generation::Table::Static(table), seed, params)
+    LootRng::new(None, seed, params.world)
+        .with(|rng| generation::generate(generation::Table::Static(table), rng, params))
 }
 pub use generate_loot as generate_chest_loot;
 #[must_use]
@@ -379,19 +380,103 @@ pub fn generate_dynamic_loot_with_context(
     seed: i64,
     params: &LootContextParameters<'_>,
 ) -> Vec<ItemStack> {
-    generation::generate(generation::Table::Dynamic(table), seed, params)
+    LootRng::new(table.random_sequence.as_deref(), seed, params.world)
+        .with(|rng| generation::generate(generation::Table::Dynamic(table), rng, params))
+}
+
+/// The random source of one loot roll, vanilla `LootContext.random`.
+pub enum LootRng {
+    /// `RandomSource.create(seed)` for a non-zero seed, else a fresh level-style random.
+    Owned(RandomGenerator),
+    /// The server's `RandomSequences` entry for the table's `random_sequence`.
+    Sequence {
+        server: std::sync::Arc<crate::server::Server>,
+        key: String,
+        world_seed: i64,
+    },
+}
+
+impl LootRng {
+    /// Vanilla `LootContext.Builder.withOptionalRandomSeed(seed).create(randomSequence)`: a
+    /// non-zero seed wins, then the table's random sequence, then the level random.
+    #[must_use]
+    pub fn new(random_sequence: Option<&str>, seed: i64, world: Option<&World>) -> Self {
+        if seed != 0 {
+            return Self::Owned(RandomGenerator::Legacy(LegacyRand::from_seed(seed as u64)));
+        }
+        if let Some(key) = random_sequence
+            && let Some(server) = world.and_then(|world| world.server.upgrade())
+        {
+            let world_seed = server.level_info.load().world_gen_settings.seed;
+            return Self::Sequence {
+                server,
+                key: key.to_string(),
+                world_seed,
+            };
+        }
+        Self::Owned(RandomGenerator::Legacy(LegacyRand::from_seed(
+            rand::random(),
+        )))
+    }
+
+    /// Runs `f` with the random source; a sequence stays locked for the call.
+    pub fn with<T>(&mut self, f: impl FnOnce(&mut RandomGenerator) -> T) -> T {
+        match self {
+            Self::Owned(rng) => f(rng),
+            Self::Sequence {
+                server,
+                key,
+                world_seed,
+            } => {
+                let mut sequences = server
+                    .random_sequences
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                f(sequences.get_or_create_key(key, *world_seed).random())
+            }
+        }
+    }
+}
+
+/// Generated loot and the random source that rolled it, which vanilla `LootTable.fill` keeps
+/// using to place the items.
+pub struct LootRoll {
+    pub items: Vec<ItemStack>,
+    pub rng: LootRng,
+}
+
+impl From<Vec<ItemStack>> for LootRoll {
+    fn from(items: Vec<ItemStack>) -> Self {
+        Self {
+            items,
+            rng: LootRng::new(None, 0, None),
+        }
+    }
+}
+
+/// Vanilla `LootTable.getRandomItems(LootContext)`, keeping the context random for placement.
+#[must_use]
+pub fn roll_loot(handle: &LootTableHandle, seed: i64, params: &LootContextParameters) -> LootRoll {
+    let mut rng = LootRng::new(handle.random_sequence(), seed, params.world);
+    let table = match handle {
+        LootTableHandle::Static(table, _) => generation::Table::Static(table),
+        LootTableHandle::Dynamic(table) => generation::Table::Dynamic(table),
+    };
+    let items = rng.with(|rng| generation::generate(table, rng, params));
+    LootRoll { items, rng }
 }
 
 /// A handle to either a compile-time static loot table or a datapack dynamic loot table.
 #[derive(Clone, Debug)]
 pub enum LootTableHandle {
-    Static(&'static LootTable),
+    /// A vanilla table and its `random_sequence` (the table id for every vanilla table).
+    Static(&'static LootTable, Option<Box<str>>),
     Dynamic(std::sync::Arc<DynamicLootTable>),
 }
 
 impl From<&'static LootTable> for LootTableHandle {
     fn from(t: &'static LootTable) -> Self {
-        Self::Static(t)
+        Self::Static(t, None)
     }
 }
 
@@ -402,6 +487,26 @@ impl From<std::sync::Arc<DynamicLootTable>> for LootTableHandle {
 }
 
 impl LootTableHandle {
+    /// A vanilla table looked up by `key`: its `random_sequence` is the table id.
+    #[must_use]
+    pub fn vanilla(table: &'static LootTable, key: &str) -> Self {
+        let key = if key.contains(':') {
+            key.into()
+        } else {
+            format!("minecraft:{key}").into_boxed_str()
+        };
+        Self::Static(table, Some(key))
+    }
+
+    /// Vanilla `LootTable.randomSequence`.
+    #[must_use]
+    pub fn random_sequence(&self) -> Option<&str> {
+        match self {
+            Self::Static(_, sequence) => sequence.as_deref(),
+            Self::Dynamic(table) => table.random_sequence.as_deref(),
+        }
+    }
+
     #[must_use]
     pub fn generate_loot(&self, seed: i64) -> Vec<ItemStack> {
         self.generate_loot_with_context(seed, &LootContextParameters::default())
@@ -484,7 +589,7 @@ pub fn evaluate_predicate_value(
                 .tool
                 .as_ref()
                 .is_some_and(|tool| tool.item.id == pumpkin_data::item::Item::SHEARS.id);
-            let mut rng = Xoroshiro::from_seed(rand::random());
+            let mut rng = RandomGenerator::Legacy(LegacyRand::from_seed(rand::random()));
             check_dynamic_condition(&cond, has_silk_touch, has_shears, params, &mut rng)
         },
     )
@@ -499,7 +604,7 @@ pub fn get_loot_table(key: &str) -> Option<LootTableHandle> {
     };
     pumpkin_data::loot_table::get_loot_table(key)
         .or_else(|| pumpkin_data::loot_table::get_loot_table(&full_key))
-        .map(LootTableHandle::Static)
+        .map(|table| LootTableHandle::vanilla(table, &full_key))
 }
 
 #[must_use]
@@ -508,21 +613,18 @@ pub fn generate_loot_from_handle(
     seed: i64,
     params: &LootContextParameters,
 ) -> Vec<ItemStack> {
-    match handle {
-        LootTableHandle::Static(table) => generate_loot_with_context(table, seed, params),
-        LootTableHandle::Dynamic(table) => generate_dynamic_loot_with_context(table, seed, params),
-    }
+    roll_loot(handle, seed, params).items
 }
 
 /// Places loot into empty slots of `slots`. Occupied slots stay.
-pub fn place_items_in_slots(slots: &mut [ItemStack], items_to_place: Vec<ItemStack>, seed: i64) {
+pub fn place_items_in_slots(slots: &mut [ItemStack], roll: LootRoll) {
     let empty_slots = slots
         .iter()
         .enumerate()
         .filter(|(_, stack)| stack.is_empty())
         .map(|(slot, _)| slot)
         .collect();
-    place_items(empty_slots, items_to_place, seed, |slot, item| {
+    place_items(empty_slots, roll, |slot, item| {
         slots[slot] = item;
     });
 }
@@ -530,14 +632,13 @@ pub fn place_items_in_slots(slots: &mut [ItemStack], items_to_place: Vec<ItemSta
 /// Vanilla `RandomizableContainer.unpackLootTable` lock protocol for concurrent containers.
 ///
 /// Takes the pending loot-table key so another unpack cannot run, runs `generate` with neither
-/// chest lock held, then places into still-empty slots so concurrent inserts stay.
-// Note (RNG source, FORK_TODO): vanilla `LootTable.fill` shuffles empty slots with the loot-context RNG after `getRandomItems`,
-// not a fresh generator from the same seed.
+/// chest lock held, then places into still-empty slots so concurrent inserts stay. Like vanilla
+/// `LootTable.fill`, the slots are shuffled with the random source that rolled the loot.
 pub fn unpack_loot_into_slots<const N: usize>(
     loot_table: &std::sync::Mutex<Option<String>>,
     seed: i64,
     items: &std::sync::RwLock<[ItemStack; N]>,
-    generate: impl FnOnce(String, i64) -> Vec<ItemStack>,
+    generate: impl FnOnce(String, i64) -> LootRoll,
 ) -> Option<String> {
     let key = {
         let mut loot = loot_table
@@ -545,46 +646,44 @@ pub fn unpack_loot_into_slots<const N: usize>(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         loot.take()?
     };
-    let generated = generate(key.clone(), seed);
+    let roll = generate(key.clone(), seed);
     let mut slots = items
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    place_items_in_slots(&mut *slots, generated, seed);
+    place_items_in_slots(&mut *slots, roll);
     Some(key)
 }
 
 fn place_items_in_chest(
     inventory: &std::sync::Arc<dyn pumpkin_inventory::Inventory>,
-    items_to_place: Vec<ItemStack>,
-    seed: i64,
+    roll: LootRoll,
 ) {
     let empty_slots = (0..inventory.size())
         .filter(|&slot| inventory.get_stack(slot).is_empty())
         .collect();
-    place_items(empty_slots, items_to_place, seed, |slot, item| {
+    place_items(empty_slots, roll, |slot, item| {
         inventory.set_stack(slot, item);
     });
 }
 
 /// Vanilla `LootTable.fill` placement: shuffled empty slots, split stacks, last slot first.
-fn place_items(
-    mut empty_slots: Vec<usize>,
-    mut items_to_place: Vec<ItemStack>,
-    seed: i64,
-    mut set: impl FnMut(usize, ItemStack),
-) {
+fn place_items(mut empty_slots: Vec<usize>, roll: LootRoll, mut set: impl FnMut(usize, ItemStack)) {
+    let LootRoll {
+        items: mut items_to_place,
+        mut rng,
+    } = roll;
     if items_to_place.is_empty() {
         return;
     }
 
-    let mut rng = Xoroshiro::from_seed(seed as u64);
-
-    for i in (1..empty_slots.len()).rev() {
-        let j = rng.next_bounded_i32((i + 1) as i32) as usize;
-        empty_slots.swap(i, j);
-    }
-
-    shuffle_and_split_items(&mut items_to_place, empty_slots.len(), &mut rng);
+    rng.with(|rng| {
+        // Vanilla `getAvailableSlots`: `Util.shuffle` of the empty slots.
+        for i in (1..empty_slots.len()).rev() {
+            let j = rng.next_bounded_i32((i + 1) as i32) as usize;
+            empty_slots.swap(i, j);
+        }
+        shuffle_and_split_items(&mut items_to_place, empty_slots.len(), rng);
+    });
 
     for item in items_to_place {
         let Some(slot) = empty_slots.pop() else {
@@ -601,8 +700,7 @@ pub fn fill_chest_inventory_handle(
     seed: i64,
     params: &LootContextParameters<'_>,
 ) {
-    let items_to_place = generate_loot_from_handle(handle, seed, params);
-    place_items_in_chest(inventory, items_to_place, seed);
+    place_items_in_chest(inventory, roll_loot(handle, seed, params));
 }
 
 pub fn fill_chest_inventory(
@@ -610,14 +708,21 @@ pub fn fill_chest_inventory(
     table: &LootTable,
     seed: i64,
 ) {
-    let items_to_place = generate_loot(table, seed);
-    place_items_in_chest(inventory, items_to_place, seed);
+    let mut rng = LootRng::new(None, seed, None);
+    let items = rng.with(|rng| {
+        generation::generate(
+            generation::Table::Static(table),
+            rng,
+            &LootContextParameters::default(),
+        )
+    });
+    place_items_in_chest(inventory, LootRoll { items, rng });
 }
 
 fn shuffle_and_split_items(
     result: &mut Vec<ItemStack>,
     available_slots: usize,
-    rng: &mut Xoroshiro,
+    rng: &mut RandomGenerator,
 ) {
     let mut splittable: Vec<ItemStack> = Vec::new();
     let mut i = 0;

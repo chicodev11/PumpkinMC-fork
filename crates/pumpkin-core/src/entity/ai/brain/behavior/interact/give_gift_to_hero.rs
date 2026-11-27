@@ -97,7 +97,7 @@ fn throw_gift(tick: &BrainTick<'_>, target: &Arc<dyn EntityBase>) {
         this_entity: Some(tick.mob),
         ..Default::default()
     };
-    for stack in generate_loot_from_handle(&table, tick.mob.get_random().random::<i64>(), &params) {
+    for stack in generate_loot_from_handle(&table, 0, &params) {
         utils::throw_item(tick.mob, stack, target.get_entity().pos.load());
     }
 }

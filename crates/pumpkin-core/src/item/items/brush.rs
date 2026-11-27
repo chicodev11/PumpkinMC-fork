@@ -55,14 +55,13 @@ fn get_archaeology_loot(
                 );
             }
             let seed = brushable.loot_table_seed.lock().map_or(0, |g| *g);
-            let actual_seed = if seed == 0 { rand::random() } else { seed };
             let stripped = loot_key.strip_prefix("minecraft:").unwrap_or(&loot_key);
             if let Some(table) = world
                 .get_loot_table(&loot_key)
                 .or_else(|| world.get_loot_table(stripped))
             {
                 let items = table.generate_loot_with_context(
-                    actual_seed,
+                    seed,
                     &crate::world::loot::LootContextParameters {
                         world: Some(world),
                         ..Default::default()
@@ -91,7 +90,7 @@ fn get_archaeology_loot(
 
     if let Some(table) = world.get_loot_table(loot_key) {
         let items = table.generate_loot_with_context(
-            rand::random(),
+            0,
             &crate::world::loot::LootContextParameters {
                 world: Some(world),
                 ..Default::default()

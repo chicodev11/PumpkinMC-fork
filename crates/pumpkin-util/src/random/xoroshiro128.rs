@@ -43,6 +43,24 @@ impl Xoroshiro {
         Self::new(lo, hi)
     }
 
+    /// Vanilla `new XoroshiroRandomSource(seed128.mixed())`: Stafford-13 mixes both words.
+    #[must_use]
+    pub const fn from_seed128_mixed(lo: u64, hi: u64) -> Self {
+        Self::new(mix_stafford_13(lo), mix_stafford_13(hi))
+    }
+
+    /// Vanilla `new Xoroshiro128PlusPlus(lo, hi)`: the state words as saved.
+    #[must_use]
+    pub const fn from_state(lo: u64, hi: u64) -> Self {
+        Self::new(lo, hi)
+    }
+
+    /// The two state words (vanilla `Xoroshiro128PlusPlus.CODEC` saves them as `[lo, hi]`).
+    #[must_use]
+    pub const fn state(&self) -> (u64, u64) {
+        (self.lo, self.hi)
+    }
+
     /// Creates a new Xoroshiro generator with the given state words.
     ///
     /// If both state words are zero, they are replaced with default values

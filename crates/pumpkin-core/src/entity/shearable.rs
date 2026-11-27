@@ -106,5 +106,5 @@ pub fn shearing_loot(
         tool: Some(tool.clone()),
         ..Default::default()
     };
-    generate_loot_from_handle(&loot_table, rand::random(), &params)
+    generate_loot_from_handle(&loot_table, 0, &params)
 }

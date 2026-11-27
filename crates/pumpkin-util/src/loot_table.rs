@@ -425,6 +425,8 @@ impl From<LootPool> for DynamicLootPool {
 pub struct DynamicLootTable {
     pub pools: Vec<DynamicLootPool>,
     pub functions: Vec<DynamicLootFunction>,
+    /// Vanilla `LootTable.randomSequence`, the `random_sequence` field of the table JSON.
+    pub random_sequence: Option<String>,
 }
 
 impl From<&LootTable> for DynamicLootTable {
@@ -442,6 +444,7 @@ impl From<&LootTable> for DynamicLootTable {
                 .cloned()
                 .map(DynamicLootFunction::from)
                 .collect(),
+            random_sequence: None,
         }
     }
 }

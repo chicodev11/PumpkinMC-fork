@@ -4,7 +4,7 @@ use super::{
     DynamicLootCondition, DynamicLootEntry, DynamicLootEntryKind, DynamicLootFunction,
     DynamicLootPool, DynamicLootTable, Item, ItemStack, LootCondition, LootContextParameters,
     LootEntry, LootEntryKind, LootFunction, LootFunctionKind, LootNumberProvider, LootPool,
-    LootTable, LootTableHandle, RandomImpl, Taggable, Xoroshiro, add_stew_effect,
+    LootTable, LootTableHandle, RandomGenerator, RandomImpl, Taggable, add_stew_effect,
     apply_bonus_formula, check_condition, check_dynamic_condition, get_loot_table, smelt,
 };
 use pumpkin_data::data_component::DataComponent;
@@ -213,7 +213,7 @@ struct Stack {
 
 pub(super) fn generate(
     table: Table<'_>,
-    seed: i64,
+    rng: &mut RandomGenerator,
     params: &LootContextParameters<'_>,
 ) -> Vec<ItemStack> {
     let has_silk_touch = params
@@ -226,7 +226,7 @@ pub(super) fn generate(
         .is_some_and(|tool| tool.item == &Item::SHEARS);
     let mut generator = Generator {
         params,
-        rng: Xoroshiro::from_seed(seed as u64),
+        rng,
         visited: HashSet::new(),
         has_silk_touch,
         has_shears,
@@ -256,7 +256,7 @@ pub(super) fn generate(
 
 struct Generator<'a, 'b> {
     params: &'a LootContextParameters<'b>,
-    rng: Xoroshiro,
+    rng: &'a mut RandomGenerator,
     visited: HashSet<*const ()>,
     has_silk_touch: bool,
     has_shears: bool,
@@ -279,14 +279,14 @@ impl Generator<'_, '_> {
                 self.has_silk_touch,
                 self.has_shears,
                 self.params,
-                &mut self.rng,
+                self.rng,
             ),
             Condition::Dynamic(condition) => check_dynamic_condition(
                 condition,
                 self.has_silk_touch,
                 self.has_shears,
                 self.params,
-                &mut self.rng,
+                self.rng,
             ),
         }
     }
@@ -528,7 +528,7 @@ impl Generator<'_, '_> {
                     .map_or_else(|| get_loot_table(key), |world| world.get_loot_table(key));
                 if let Some(handle) = handle {
                     match &handle {
-                        LootTableHandle::Static(table) => {
+                        LootTableHandle::Static(table, _) => {
                             self.table(Table::Static(table), functions, output);
                         }
                         LootTableHandle::Dynamic(table) => {
@@ -567,7 +567,7 @@ impl Generator<'_, '_> {
                             formula,
                             enchantment
                                 .map_or(0, |name| super::tool_enchantment_level(self.params, name)),
-                            &mut self.rng,
+                            self.rng,
                         );
                     }
                     LootFunctionKind::EnchantedCountIncrease { count, limit } => {

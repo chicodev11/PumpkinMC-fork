@@ -88,7 +88,11 @@ pub trait BlockEntity: Any + Send + Sync {
     // Chests, barrels, shulker boxes, dispensers and droppers implement it; decorated pots unpack
     // through their own `unpack_loot_table`. Vanilla hoppers and crafters can hold loot tables too
     // (only through commands or data packs) and still ignore them.
-    fn unpack_loot_table_with(&self, _generate: &mut dyn FnMut(String, i64) -> Vec<ItemStack>) {}
+    fn unpack_loot_table_with(
+        &self,
+        _generate: &mut dyn FnMut(String, i64) -> crate::world::loot::LootRoll,
+    ) {
+    }
 
     /// Returns `true` if this block entity has a pending deferred loot table that has
     /// not yet been unpacked. Does not consume the loot table.

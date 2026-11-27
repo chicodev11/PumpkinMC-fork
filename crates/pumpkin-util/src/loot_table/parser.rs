@@ -121,6 +121,10 @@ impl<R: Fn(&str) -> Option<Value>> Parser<'_, R> {
         Some(Table {
             pools,
             functions: self.functions(value),
+            random_sequence: value
+                .get("random_sequence")
+                .and_then(Value::as_str)
+                .map(String::from),
         })
     }
 

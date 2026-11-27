@@ -3229,10 +3229,8 @@ impl LivingEntity {
             });
         let world = self.entity.world.load();
         if let Some(loot_table) = world.get_loot_table(&key) {
-            let seed = mob
-                .map(|mob| mob.death_loot_table_seed.load(Relaxed))
-                .filter(|seed| *seed != 0)
-                .unwrap_or_else(rand::random);
+            // Vanilla `getLootTableSeed()`: 0 rolls the table's random sequence.
+            let seed = mob.map_or(0, |mob| mob.death_loot_table_seed.load(Relaxed));
             // Vanilla `dropFromLootTable` -> `spawnAtLocation`.
             for stack in crate::world::loot::generate_loot_from_handle(&loot_table, seed, params) {
                 self.entity.spawn_at_location(stack);

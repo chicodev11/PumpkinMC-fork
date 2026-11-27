@@ -557,7 +557,7 @@ impl DatapackManager {
 
         pumpkin_data::loot_table::get_loot_table(key)
             .or_else(|| pumpkin_data::loot_table::get_loot_table(&full_key))
-            .map(LootTableHandle::Static)
+            .map(|table| LootTableHandle::vanilla(table, &full_key))
     }
 
     #[must_use]
