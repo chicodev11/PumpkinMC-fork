@@ -42,6 +42,9 @@ use crate::entity::player::Player;
 use crate::entity::{Entity, EntityBase};
 use crate::net::ClientPlatform;
 use crate::net::java::JavaClient;
+use crate::plugin::api::events::player::{
+    player_track_entity::PlayerTrackEntityEvent, player_untrack_entity::PlayerUntrackEntityEvent,
+};
 use crate::world::World;
 use crate::world::chunker::get_view_distance;
 
@@ -650,6 +653,24 @@ impl TrackedEntity {
         })
     }
 
+    /// Fires Paper `PlayerTrackEntityEvent`; `true` when a plugin cancelled it.
+    fn track_cancelled(&self, player: &Arc<Player>) -> bool {
+        let mut event = PlayerTrackEntityEvent {
+            player: player.clone(),
+            entity: self.entity.clone(),
+            cancelled: false,
+        };
+        player.world().fire_plugin_event(&mut event)
+    }
+
+    /// Fires Paper `PlayerUntrackEntityEvent`.
+    fn fire_untrack(&self, player: &Arc<Player>) {
+        player.world().plugin_event(|| PlayerUntrackEntityEvent {
+            player: player.clone(),
+            entity: self.entity.clone(),
+        });
+    }
+
     pub fn update_player(&self, player: &Arc<Player>, _world: &World) {
         if player.get_entity().entity_id == self.entity_id {
             return;
@@ -731,7 +752,11 @@ impl TrackedEntity {
                     if matches!(player.client.as_ref(), ClientPlatform::Bedrock(_)) {
                         self.bedrock_watchers.fetch_add(1, Relaxed);
                     }
-                    self.add_pairing(player);
+                    // Paper `PlayerTrackEntityEvent`: a cancelled track stays in `seen_by`
+                    // without spawn packets.
+                    if !self.track_cancelled(player) {
+                        self.add_pairing(player);
+                    }
                 }
                 return;
             }
@@ -1161,6 +1186,9 @@ impl TrackedEntity {
         let entity_ids = [self.entity_id.into()];
         let je_packet = CRemoveEntities::new(&entity_ids);
         World::broadcast_java_players(&je_packet, seen_by.values());
+        for player in seen_by.values() {
+            self.fire_untrack(player);
+        }
         if had_bedrock {
             let be_packet = CRemoveActor::new(VarLong(i64::from(self.entity_id)));
             World::broadcast_bedrock_grouped(
@@ -1187,13 +1215,13 @@ impl TrackedEntity {
             .seen_by
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&player.gameprofile.id)
-            .is_some();
-        if removed {
+            .remove(&player.gameprofile.id);
+        if let Some(removed) = removed {
             if matches!(player.client.as_ref(), ClientPlatform::Bedrock(_)) {
                 self.bedrock_watchers.fetch_sub(1, Relaxed);
             }
             self.remove_pairing(player);
+            self.fire_untrack(&removed);
         }
     }
 

@@ -2601,3 +2601,186 @@ impl ToFromWasmEvent for PlayerUnregisterChannelEvent {
         }
     }
 }
+
+mod paper_player {
+    use crate::{
+        events::{
+            ToFromWasmEvent, cleanup_event, consume_player, consume_world, entity::consume_entity,
+            from_wasm_position, to_wasm_position,
+        },
+        pumpkin::plugin::event::{
+            Event, PlayerJumpEventData, PlayerPickupExperienceEventData,
+            PlayerPostRespawnEventData, PlayerTrackEntityEventData, PlayerUntrackEntityEventData,
+        },
+    };
+    use pumpkin_core::plugin::api::events::player::{
+        player_jump::PlayerJumpEvent, player_pickup_experience::PlayerPickupExperienceEvent,
+        player_post_respawn::PlayerPostRespawnEvent, player_track_entity::PlayerTrackEntityEvent,
+        player_untrack_entity::PlayerUntrackEntityEvent,
+    };
+    use pumpkin_wasm_host_common::state::PluginHostState;
+
+    impl ToFromWasmEvent for PlayerJumpEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            Event::PlayerJumpEvent(PlayerJumpEventData {
+                player,
+                from_position: to_wasm_position(self.from),
+                to_position: to_wasm_position(self.to),
+                cancelled: self.cancelled,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+            if let Event::PlayerJumpEvent(data) = event {
+                self.cancelled = data.cancelled;
+            }
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerJumpEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    from: from_wasm_position(data.from_position),
+                    to: from_wasm_position(data.to_position),
+                    cancelled: data.cancelled,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PlayerPickupExperienceEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let orb = state
+                .add(self.orb.clone())
+                .expect("failed to add entity resource");
+            Event::PlayerPickupExperienceEvent(PlayerPickupExperienceEventData {
+                player,
+                orb,
+                experience: self.experience,
+                cancelled: self.cancelled,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+            if let Event::PlayerPickupExperienceEvent(data) = event {
+                self.cancelled = data.cancelled;
+            }
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerPickupExperienceEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    orb: consume_entity(state, &data.orb).expect("orb entity resource"),
+                    experience: data.experience,
+                    cancelled: data.cancelled,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PlayerPostRespawnEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let respawned_world = state
+                .add(self.world.clone())
+                .expect("failed to add world resource");
+            Event::PlayerPostRespawnEvent(PlayerPostRespawnEventData {
+                player,
+                respawned_world,
+                position: to_wasm_position(self.position),
+                yaw: self.yaw,
+                pitch: self.pitch,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerPostRespawnEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    world: consume_world(state, &data.respawned_world),
+                    position: from_wasm_position(data.position),
+                    yaw: data.yaw,
+                    pitch: data.pitch,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PlayerTrackEntityEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let entity = state
+                .add(self.entity.clone())
+                .expect("failed to add entity resource");
+            Event::PlayerTrackEntityEvent(PlayerTrackEntityEventData {
+                player,
+                entity,
+                cancelled: self.cancelled,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+            if let Event::PlayerTrackEntityEvent(data) = event {
+                self.cancelled = data.cancelled;
+            }
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerTrackEntityEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    entity: consume_entity(state, &data.entity).expect("entity resource"),
+                    cancelled: data.cancelled,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PlayerUntrackEntityEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let entity = state
+                .add(self.entity.clone())
+                .expect("failed to add entity resource");
+            Event::PlayerUntrackEntityEvent(PlayerUntrackEntityEventData { player, entity })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerUntrackEntityEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    entity: consume_entity(state, &data.entity).expect("entity resource"),
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+}

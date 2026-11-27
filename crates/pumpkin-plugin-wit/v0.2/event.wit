@@ -1176,6 +1176,46 @@ interface event {
         cancelled: bool
     }
 
+    /// Paper `PlayerJumpEvent`. Cancelling sends the player back to `from-position`.
+    record player-jump-event-data {
+        player: player,
+        from-position: position,
+        to-position: position,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerPickupExperienceEvent`, fired before the pickup cooldown starts.
+    record player-pickup-experience-event-data {
+        player: player,
+        orb: entity,
+        /// The experience one pickup of the orb gives. Read-only.
+        experience: s32,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerPostRespawnEvent`: the respawn has finished. Read-only.
+    record player-post-respawn-event-data {
+        player: player,
+        respawned-world: %world,
+        position: position,
+        yaw: f32,
+        pitch: f32
+    }
+
+    /// Paper `PlayerTrackEntityEvent`. Cancelling skips the spawn packets; the player still
+    /// counts as tracking the entity.
+    record player-track-entity-event-data {
+        player: player,
+        entity: entity,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerUntrackEntityEvent`: out of range or removed. Read-only.
+    record player-untrack-entity-event-data {
+        player: player,
+        entity: entity
+    }
+
     record player-harvest-block-event-data {
         player: player,
         block-pos: block-pos,
@@ -2335,6 +2375,11 @@ interface event {
         player-edit-book-event,
         player-elytra-boost-event,
         player-exp-cooldown-change-event,
+        player-jump-event,
+        player-pickup-experience-event,
+        player-post-respawn-event,
+        player-track-entity-event,
+        player-untrack-entity-event,
         player-harvest-block-event,
         player-hide-entity-event,
         player-item-break-event,
@@ -2621,6 +2666,11 @@ interface event {
         player-edit-book-event(player-edit-book-event-data),
         player-elytra-boost-event(player-elytra-boost-event-data),
         player-exp-cooldown-change-event(player-exp-cooldown-change-event-data),
+        player-jump-event(player-jump-event-data),
+        player-pickup-experience-event(player-pickup-experience-event-data),
+        player-post-respawn-event(player-post-respawn-event-data),
+        player-track-entity-event(player-track-entity-event-data),
+        player-untrack-entity-event(player-untrack-entity-event-data),
         player-harvest-block-event(player-harvest-block-event-data),
         player-hide-entity-event(player-hide-entity-event-data),
         player-item-break-event(player-item-break-event-data),

@@ -166,7 +166,7 @@ fn consume_drops(
         .collect()
 }
 
-fn consume_entity(
+pub(super) fn consume_entity(
     state: &mut PluginHostState,
     entity: &wasmtime::component::Resource<crate::pumpkin::plugin::entity::Entity>,
 ) -> Option<Arc<dyn pumpkin_core::entity::EntityBase>> {

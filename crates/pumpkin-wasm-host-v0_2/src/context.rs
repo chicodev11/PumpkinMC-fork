@@ -239,6 +239,31 @@ fn register_player_event(
                 pumpkin_core::plugin::api::events::player::player_elytra_boost::PlayerElytraBoostEvent,
             >(ctx, handler, priority, blocking);
         }
+        EventType::PlayerJumpEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::player::player_jump::PlayerJumpEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerPickupExperienceEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_pickup_experience::PlayerPickupExperienceEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::PlayerPostRespawnEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_post_respawn::PlayerPostRespawnEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::PlayerTrackEntityEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_track_entity::PlayerTrackEntityEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::PlayerUntrackEntityEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_untrack_entity::PlayerUntrackEntityEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
         EventType::PlayerExpCooldownChangeEvent => {
             register_typed_event::<
                 pumpkin_core::plugin::api::events::player::player_exp_cooldown_change::PlayerExpCooldownChangeEvent,

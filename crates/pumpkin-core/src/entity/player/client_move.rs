@@ -12,6 +12,7 @@ use pumpkin_util::text::TextComponent;
 use crate::entity::EntityBase;
 use crate::net::{ClientPlatform, DisconnectReason};
 use crate::plugin::player::player_input::PlayerInputEvent;
+use crate::plugin::player::player_jump::PlayerJumpEvent;
 use crate::plugin::player::player_move::PlayerMoveEvent;
 use crate::plugin::player::player_toggle_flight_event::PlayerToggleFlightEvent;
 use crate::plugin::player::player_toggle_sneak_event::PlayerToggleSneakEvent;
@@ -266,6 +267,20 @@ impl Player {
 
         let pos = target.unwrap_or(last_pos);
         let was_on_ground = entity.on_ground.load(Ordering::Relaxed);
+        // Vanilla `onGround && !isOnGround && movedUpwards` -> `jumpFromGround`
+        let jumped = was_on_ground && !requested.on_ground && pos.y - last_pos.y > 0.0;
+        // Paper `PlayerJumpEvent`: cancelling sends the player back to where they jumped from.
+        if jumped
+            && server.plugin_manager.has_handlers::<PlayerJumpEvent>()
+            && let Some(player) = self.world().get_player_by_uuid(self.gameprofile.id)
+        {
+            let mut event = PlayerJumpEvent::new(player, last_pos, pos);
+            server.plugin_manager.fire_blocking(server, &mut event);
+            if event.cancelled {
+                self.reject_client_move();
+                return ClientMoveOutcome::Rejected;
+            }
+        }
         entity.set_pos(pos);
 
         let delta = Vector3::new(pos.x - last_pos.x, pos.y - last_pos.y, pos.z - last_pos.z);
@@ -276,8 +291,7 @@ impl Player {
             self.increment_stat(StatisticCategory::Custom, stat as i32, cm);
         }
 
-        // Vanilla `onGround && !isOnGround && movedUpwards` -> `jumpFromGround`
-        if was_on_ground && !requested.on_ground && delta.y > 0.0 {
+        if jumped {
             self.jump();
         }
 

@@ -669,6 +669,25 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
         Event::PlayerExpCooldownChangeEvent(data) => {
             cleanup_player(state, &data.player);
         }
+        Event::PlayerJumpEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerPickupExperienceEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.orb);
+        }
+        Event::PlayerPostRespawnEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_world(state, &data.respawned_world);
+        }
+        Event::PlayerTrackEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.entity);
+        }
+        Event::PlayerUntrackEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.entity);
+        }
         Event::PlayerHarvestBlockEvent(data) => {
             cleanup_player(state, &data.player);
             for res in &data.harvested_items {

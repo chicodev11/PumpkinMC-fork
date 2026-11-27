@@ -5070,6 +5070,23 @@ impl World {
         player.request_teleport(position, yaw, pitch);
 
         target_world.refresh_java_player_for_bedrock(player).await;
+
+        // Paper `PlayerPostRespawnEvent`: the player is in place in the new world.
+        if let Some(server) = self.server.upgrade() {
+            server
+                .plugin_manager
+                .fire(
+                    &server,
+                    &mut crate::plugin::api::events::player::player_post_respawn::PlayerPostRespawnEvent {
+                        player: player.clone(),
+                        world: target_world,
+                        position,
+                        yaw,
+                        pitch,
+                    },
+                )
+                .await;
+        }
     }
 
     /// Players counted for sleeping: spectators and players set to be ignored are not.

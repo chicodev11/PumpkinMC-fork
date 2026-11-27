@@ -82,6 +82,8 @@ pub mod player_item_damage;
 pub mod player_item_mend;
 /// Player join event.
 pub mod player_join;
+/// Player Jump event.
+pub mod player_jump;
 /// Player kick event.
 pub mod player_kick;
 /// Player leash entity event.
@@ -106,8 +108,12 @@ pub mod player_open_sign;
 pub mod player_permission_check;
 /// Player pickup arrow event.
 pub mod player_pickup_arrow;
+/// Player Pickup Experience event.
+pub mod player_pickup_experience;
 /// Player portal event.
 pub mod player_portal;
+/// Player Post Respawn event.
+pub mod player_post_respawn;
 /// Player pre-login event.
 pub mod player_pre_login;
 /// Player recipe book click event.
@@ -146,10 +152,14 @@ pub mod player_toggle_flight;
 pub mod player_toggle_sneak;
 /// Player toggle sprint event.
 pub mod player_toggle_sprint;
+/// Player Track Entity event.
+pub mod player_track_entity;
 /// Player unleash entity event.
 pub mod player_unleash_entity;
 /// Player unregister channel event.
 pub mod player_unregister_channel;
+/// Player Untrack Entity event.
+pub mod player_untrack_entity;
 /// Player velocity change event.
 pub mod player_velocity;
 
@@ -195,6 +205,7 @@ pub use player_item_consume::*;
 pub use player_item_damage::*;
 pub use player_item_mend::*;
 pub use player_join::*;
+pub use player_jump::*;
 pub use player_kick::*;
 pub use player_leash_entity::*;
 pub use player_leave::*;
@@ -207,7 +218,9 @@ pub use player_name_entity::*;
 pub use player_open_sign::*;
 pub use player_permission_check::*;
 pub use player_pickup_arrow::*;
+pub use player_pickup_experience::*;
 pub use player_portal::*;
+pub use player_post_respawn::*;
 pub use player_pre_login::*;
 pub use player_recipe_book_click::*;
 pub use player_recipe_book_settings_change::*;
@@ -227,6 +240,8 @@ pub use player_teleport::*;
 pub use player_toggle_flight::*;
 pub use player_toggle_sneak::*;
 pub use player_toggle_sprint::*;
+pub use player_track_entity::*;
 pub use player_unleash_entity::*;
 pub use player_unregister_channel::*;
+pub use player_untrack_entity::*;
 pub use player_velocity::*;

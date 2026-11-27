@@ -36,6 +36,31 @@ pub struct ExperienceOrbEntity {
 
 impl ExperienceOrbEntity {
     const AIR_DRAG: f32 = 0.98;
+
+    /// Fires Paper `PlayerPickupExperienceEvent`; `true` when a plugin cancelled the pickup.
+    fn pickup_cancelled(&self, player: &Arc<Player>) -> bool {
+        use crate::plugin::api::events::player::player_pickup_experience::PlayerPickupExperienceEvent;
+        let world = player.world();
+        let Some(server) = world.server.upgrade() else {
+            return false;
+        };
+        if !server
+            .plugin_manager
+            .has_handlers::<PlayerPickupExperienceEvent>()
+        {
+            return false;
+        }
+        let Some(orb) = world.get_entity_by_id(self.entity.entity_id) else {
+            return false;
+        };
+        let mut event = PlayerPickupExperienceEvent {
+            player: player.clone(),
+            orb,
+            experience: self.value() as i32,
+            cancelled: false,
+        };
+        world.fire_plugin_event(&mut event)
+    }
     const DEFAULT_HEALTH: i32 = 5;
     const LIFETIME: u32 = 6000;
     const ENTITY_SCAN_PERIOD: i32 = 20;
@@ -537,7 +562,16 @@ impl EntityBase for ExperienceOrbEntity {
     }
 
     fn on_player_collision(&self, player: &Arc<Player>) {
-        let can_pickup = if let Ok(mut delay) = player.experience_pick_up_delay.try_lock()
+        // Paper `PlayerPickupExperienceEvent`, before the cooldown starts.
+        let ready = player
+            .experience_pick_up_delay
+            .try_lock()
+            .is_ok_and(|delay| *delay == 0);
+        if ready && self.pickup_cancelled(player) {
+            return;
+        }
+        let can_pickup = if ready
+            && let Ok(mut delay) = player.experience_pick_up_delay.try_lock()
             && *delay == 0
         {
             *delay = 2;
