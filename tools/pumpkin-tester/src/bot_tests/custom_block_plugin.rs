@@ -39,8 +39,10 @@ pub async fn run_custom_block_plugin_test(
     player.get_entity().set_pos(original_position);
     player.set_gamemode(original_mode);
     result?;
-    summary_lines
-        .push("[PASS] bot:custom_block_plugin (register, use and drops callbacks)".to_string());
+    summary_lines.push(
+        "[PASS] bot:custom_block_plugin (register, use and drops callbacks, nested event)"
+            .to_string(),
+    );
     Ok(())
 }
 
@@ -93,13 +95,20 @@ async fn run_inner(
         return Err(format!("{BLOCK} did not stay in the world"));
     }
 
-    // Right click through the network: the plugin's on-use callback places gold on top.
+    // Right click through the network: the plugin's on-use callback spawns an entity (its own
+    // spawn handler must run inside that call) and places gold on top.
     bot.use_block(pos, 1200).await?;
     for _ in 0..40 {
         tick(server, 1).await;
         if world.get_block(&above).id == Block::GOLD_BLOCK.id {
             break;
         }
+    }
+    if world.get_block(&above).id == Block::REDSTONE_BLOCK.id {
+        return Err(
+            "the plugin's spawn event did not run inside its own spawn-entity call (nested event order)"
+                .to_string(),
+        );
     }
     if world.get_block(&above).id != Block::GOLD_BLOCK.id {
         return Err("the on-use callback did not place a gold block".to_string());
