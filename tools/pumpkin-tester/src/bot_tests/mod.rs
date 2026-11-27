@@ -1,6 +1,7 @@
 mod block_tuning_and_invert;
 mod client_item_view;
 mod commands_and_gamemode;
+mod custom_block_plugin;
 mod embedded_stop;
 mod login_and_movement;
 mod loot_tables;
@@ -59,6 +60,8 @@ pub async fn run_bot_tests(
     polar_bear::run_polar_bear_defense_test(server, &bot1, summary_lines)?;
 
     vault::run_vault_test(server, &bot1, summary_lines)?;
+
+    custom_block_plugin::run_custom_block_plugin_test(server, &mut bot1, summary_lines).await?;
 
     client_item_view::run_client_item_view_test(server, &bot1.name, summary_lines)?;
 

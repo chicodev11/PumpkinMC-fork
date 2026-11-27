@@ -13,6 +13,7 @@ pumpkin-data.workspace = true
 pumpkin-gametest.workspace = true
 pumpkin-protocol.workspace = true
 pumpkin-util.workspace = true
+pumpkin-wasm-host = { workspace = true, features = ["v0_2"] }
 rayon.workspace = true
 rustls.workspace = true
 serde_json.workspace = true

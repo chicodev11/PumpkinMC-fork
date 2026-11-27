@@ -36,6 +36,24 @@ pub fn test_configs(temp_dir: &tempfile::TempDir) -> (BasicConfiguration, Advanc
     (basic_config, advanced_config)
 }
 
+static SMOKE_PLUGIN_LOADED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the `addon-smoke` WASM plugin was found and loaded at startup.
+pub fn smoke_plugin_loaded() -> bool {
+    SMOKE_PLUGIN_LOADED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `PUMPKIN_TESTER_PLUGIN`, or the release build of `official-plugins/addon-smoke` when it exists.
+fn smoke_plugin_path() -> Option<std::path::PathBuf> {
+    if let Ok(path) = std::env::var("PUMPKIN_TESTER_PLUGIN") {
+        return Some(path.into());
+    }
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../official-plugins/addon-smoke/target/wasm32-wasip2/release/addon_smoke.wasm");
+    path.exists().then_some(path)
+}
+
 pub async fn create_test_server(temp_dir: &tempfile::TempDir) -> Result<Arc<Server>, String> {
     let (basic_config, advanced_config) = test_configs(temp_dir);
     let server = Server::new(
@@ -46,6 +64,30 @@ pub async fn create_test_server(temp_dir: &tempfile::TempDir) -> Result<Arc<Serv
         Vec::new(),
     )
     .map_err(|err| format!("Failed to initialize test Server: {err}"))?;
+    // Same order as `PumpkinServer::init_plugins`: plugins load (and register custom blocks)
+    // before the registry is frozen and the worlds start.
+    if let Some(path) = smoke_plugin_path() {
+        server
+            .plugin_manager
+            .add_loader(
+                &server,
+                Arc::new(pumpkin_wasm_host::WasmPluginLoader::new(false)),
+            )
+            .await;
+        server
+            .plugin_manager
+            .try_load_plugin(&server, &path)
+            .await
+            .map_err(|err| format!("Failed to load {}: {err}", path.display()))?;
+        server
+            .plugin_manager
+            .wait_for_plugin("addon-smoke")
+            .await
+            .map_err(|err| format!("addon-smoke failed to load: {err}"))?;
+        SMOKE_PLUGIN_LOADED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    pumpkin_data::custom_block::freeze();
+    pumpkin_core::block::entities::custom::freeze();
     server.finish_world_setup().await;
     Ok(server)
 }
