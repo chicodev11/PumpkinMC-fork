@@ -753,7 +753,7 @@ impl EntityBase for ItemEntity {
         amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        _source: Option<&dyn EntityBase>,
+        source: Option<&dyn EntityBase>,
         cause: Option<&dyn EntityBase>,
     ) -> bool {
         // Vanilla `ItemEntity.hurtServer`.
@@ -783,6 +783,7 @@ impl EntityBase for ItemEntity {
                 damage_type,
                 amount,
             )
+            .with_source(&world, source, cause)
         }) {
             Some(event) if event.cancelled => return false,
             Some(event) => event.damage,

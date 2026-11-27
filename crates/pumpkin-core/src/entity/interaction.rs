@@ -290,7 +290,8 @@ impl EntityBase for InteractionEntity {
                         Some(player),
                         1.0,
                         DamageType::PLAYER_ATTACK,
-                    );
+                    )
+                    .with_entity(&world);
                 server.plugin_manager.fire_blocking(&server, &mut event);
                 if event.cancelled {
                     return false;

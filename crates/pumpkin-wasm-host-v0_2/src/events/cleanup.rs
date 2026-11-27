@@ -249,7 +249,11 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
         Event::ChunkSendEvent(data) => {
             cleanup_world(state, &data.target_world);
         }
-        Event::EntityDamageEvent(_) => {}
+        Event::EntityDamageEvent(data) => {
+            if let Some(entity) = &data.entity {
+                cleanup_entity(state, entity);
+            }
+        }
         Event::EntityDeathEvent(data) => {
             cleanup_entity(state, &data.entity);
             for item in &data.drops {
@@ -566,6 +570,9 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
         Event::EntityDamageByEntityEvent(data) => {
             if let Some(weapon) = &data.weapon {
                 cleanup_item_stack(state, weapon);
+            }
+            if let Some(entity) = &data.entity {
+                cleanup_entity(state, entity);
             }
         }
         Event::EntityDropItemEvent(_) => {}

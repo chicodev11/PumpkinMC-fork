@@ -116,10 +116,20 @@ impl ToFromWasmEvent for EntityDamageEvent {
                 entity_id: data.entity_id,
                 damage: data.damage,
                 damage_type: from_wit_damage_type(data.damage_type),
+                entity: None,
+                direct_entity_id: None,
+                causing_entity_id: None,
                 cancelled: data.cancelled,
             },
             _ => panic!("unexpected event type"),
         }
+    }
+
+    /// WIT v0.1 has no entity or damage source: only the damage and `cancelled` come back.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        let rebuilt = Self::from_wasm_event(event, state);
+        self.damage = rebuilt.damage;
+        self.cancelled = rebuilt.cancelled;
     }
 }
 
@@ -897,6 +907,7 @@ impl ToFromWasmEvent for EntityDamageByEntityEvent {
                 damage_type: pumpkin_data::damage::DamageType::GENERIC,
                 cause: data.cause,
                 weapon: None,
+                entity: None,
                 cancelled: data.cancelled,
             },
             _ => panic!("unexpected event type"),

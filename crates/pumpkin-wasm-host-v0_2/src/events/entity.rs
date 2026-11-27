@@ -104,21 +104,43 @@ use pumpkin_core::plugin::entity::{
 use pumpkin_wasm_host_common::state::PluginHostState;
 
 impl ToFromWasmEvent for EntityDamageEvent {
-    fn to_wasm_event(&self, _state: &mut PluginHostState) -> Event {
+    fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+        let entity = self
+            .entity
+            .clone()
+            .map(|entity| state.add(entity).expect("failed to add entity resource"));
         Event::EntityDamageEvent(EntityDamageEventData {
             entity_id: self.entity_id,
+            entity,
             damage: self.damage,
             damage_type: to_wit_damage_type(&self.damage_type),
+            direct_entity_id: self.direct_entity_id,
+            causing_entity_id: self.causing_entity_id,
             cancelled: self.cancelled,
         })
     }
 
-    fn from_wasm_event(event: Event, _state: &mut PluginHostState) -> Self {
+    /// Only the damage and `cancelled` can change.
+    fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+        cleanup_event(&event, state);
+        if let Event::EntityDamageEvent(data) = event {
+            self.damage = data.damage;
+            self.cancelled = data.cancelled;
+        }
+    }
+
+    fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
         match event {
             Event::EntityDamageEvent(data) => Self {
                 entity_id: data.entity_id,
+                entity: data
+                    .entity
+                    .as_ref()
+                    .and_then(|entity| consume_entity(state, entity)),
                 damage: data.damage,
                 damage_type: from_wit_damage_type(data.damage_type),
+                direct_entity_id: data.direct_entity_id,
+                causing_entity_id: data.causing_entity_id,
                 cancelled: data.cancelled,
             },
             _ => panic!("unexpected event type"),
@@ -949,6 +971,10 @@ impl ToFromWasmEvent for EntityDamageByEntityEvent {
             damage_type: to_wit_damage_type(&self.damage_type),
             cause: self.cause.clone(),
             weapon,
+            entity: self
+                .entity
+                .clone()
+                .map(|entity| state.add(entity).expect("failed to add entity resource")),
             cancelled: self.cancelled,
         })
     }
@@ -979,6 +1005,10 @@ impl ToFromWasmEvent for EntityDamageByEntityEvent {
                         .ok()
                         .and_then(|stack| stack.try_lock().ok().map(|stack| stack.clone()))
                 }),
+                entity: data
+                    .entity
+                    .as_ref()
+                    .and_then(|entity| consume_entity(state, entity)),
                 cancelled: data.cancelled,
             },
             _ => panic!("unexpected event type"),

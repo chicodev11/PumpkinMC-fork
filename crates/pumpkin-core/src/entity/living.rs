@@ -3952,7 +3952,8 @@ impl LivingEntity {
                 self.entity.entity_id,
                 damage_type,
                 amount,
-            );
+            )
+            .with_source(&self.entity.world.load(), source, cause);
         if let Some(server) = self.entity.world.load().server.upgrade() {
             server
                 .plugin_manager
@@ -3971,7 +3972,8 @@ impl LivingEntity {
                     cause,
                     amount,
                     damage_type,
-                );
+                )
+                .with_entity(&self.entity.world.load());
             if let Some(server) = self.entity.world.load().server.upgrade() {
                 server
                     .plugin_manager

@@ -32,6 +32,9 @@ pub struct EntityDamageByEntityEvent {
     /// The weapon used (`DamageSource.getWeaponItem`): the main hand item of the causing
     /// living entity (for a projectile, what it was shot with is still in that hand), if any.
     pub weapon: Option<ItemStack>,
+
+    /// Bukkit `getEntity`: the entity taking damage.
+    pub entity: Option<std::sync::Arc<dyn EntityBase>>,
 }
 
 impl EntityDamageByEntityEvent {
@@ -58,7 +61,15 @@ impl EntityDamageByEntityEvent {
             damage_type,
             cause: format!("{damage_type:?}"),
             weapon,
+            entity: None,
             cancelled: false,
         }
+    }
+
+    /// Adds the damaged entity, looked up in `world`.
+    #[must_use]
+    pub fn with_entity(mut self, world: &crate::world::World) -> Self {
+        self.entity = world.get_entity_by_id(self.entity_id);
+        self
     }
 }

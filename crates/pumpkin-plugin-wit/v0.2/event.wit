@@ -481,8 +481,16 @@ interface event {
 
     record entity-damage-event-data {
         entity-id: s32,
+        /// The entity taking damage (Bukkit `getEntity`). Read-only.
+        entity: option<entity>,
         damage: f32,
         damage-type: damage-type,
+        /// What hit it (Paper `getDamageSource().getDirectEntity()`): an arrow or the attacker.
+        /// Read-only.
+        direct-entity-id: option<s32>,
+        /// Who is responsible (`getDamageSource().getCausingEntity()`): a projectile's shooter.
+        /// Read-only.
+        causing-entity-id: option<s32>,
         cancelled: bool
     }
 
@@ -709,6 +717,8 @@ interface event {
         cause: string,
         /// The weapon used (`DamageSource.getWeaponItem`): the causing entity's main hand item.
         weapon: option<item-stack>,
+        /// The entity taking damage (Bukkit `getEntity`). Read-only.
+        entity: option<entity>,
         cancelled: bool
     }
 
