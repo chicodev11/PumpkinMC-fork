@@ -261,6 +261,9 @@ impl VanillaGenerator {
         let min_y = i32::from(shape.min_y).max(self.dimension.min_y);
         let height = shape.height.min(self.dimension.height as u16);
         crate::ProtoChunk::structure_references(self, chunk_x, chunk_z, min_y, height, wanted)
+            .into_iter()
+            .map(|(key, start, _)| (key, start))
+            .collect()
     }
 
     /// Whether `/locate` may look for `key` through the set at `set_index`, like vanilla
@@ -293,7 +296,7 @@ impl VanillaGenerator {
             wanted.contains(&key)
         })
         .iter()
-        .any(|(_, start)| {
+        .any(|(_, start, _)| {
             start
                 .collector
                 .lock()

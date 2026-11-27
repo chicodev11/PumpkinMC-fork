@@ -732,6 +732,48 @@ impl RuinedPortalPiece {
 }
 
 impl StructurePieceBase for RuinedPortalPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            &self.template_name,
+        );
+        nbt.put_string(
+            "Rotation",
+            crate::generation::structure::structures::rotation_name(self.place_settings.rotation)
+                .to_string(),
+        );
+        nbt.put_string(
+            "Mirror",
+            crate::generation::structure::structures::mirror_name(self.place_settings.mirror)
+                .to_string(),
+        );
+        nbt.put_string(
+            "VerticalPlacement",
+            match self.vertical_placement {
+                VerticalPlacement::OnLandSurface => "on_land_surface",
+                VerticalPlacement::PartlyBuried => "partly_buried",
+                VerticalPlacement::OnOceanFloor => "on_ocean_floor",
+                VerticalPlacement::InMountain => "in_mountain",
+                VerticalPlacement::Underground => "underground",
+                VerticalPlacement::InNether => "in_nether",
+            }
+            .to_string(),
+        );
+        let properties = &self.properties;
+        let mut props = pumpkin_nbt::compound::NbtCompound::new();
+        props.put_bool("cold", properties.cold);
+        props.put_float("mossiness", properties.mossiness);
+        props.put_bool("air_pocket", properties.air_pocket);
+        props.put_bool("overgrown", properties.overgrown);
+        props.put_bool("vines", properties.vines);
+        props.put_bool(
+            "replace_with_blackstone",
+            properties.replace_with_blackstone,
+        );
+        nbt.put_compound("Properties", props);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

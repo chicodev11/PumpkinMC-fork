@@ -254,6 +254,20 @@ impl EndCityTemplatePiece {
 }
 
 impl StructurePieceBase for EndCityTemplatePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.descriptor.template_position,
+            &format!("end_city/{}", self.descriptor.template_name),
+        );
+        nbt.put_string(
+            "Rot",
+            crate::generation::structure::structures::rotation_name(self.descriptor.rotation)
+                .to_string(),
+        );
+        nbt.put_bool("OW", self.descriptor.overwrite);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

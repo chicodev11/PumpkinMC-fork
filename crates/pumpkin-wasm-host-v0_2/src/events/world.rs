@@ -145,6 +145,7 @@ impl ToFromWasmEvent for ChunkSend {
                     dirty: std::sync::atomic::AtomicBool::new(false),
                     inhabited_time: std::sync::atomic::AtomicU64::new(0),
                     custom_data: std::sync::Mutex::new(pumpkin_nbt::compound::NbtCompound::new()),
+                    structures: std::sync::Mutex::new(pumpkin_nbt::compound::NbtCompound::new()),
                 };
                 Self {
                     world,

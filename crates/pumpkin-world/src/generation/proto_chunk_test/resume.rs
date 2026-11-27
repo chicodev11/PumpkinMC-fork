@@ -344,3 +344,148 @@ fn blocks_and_ocean_floor_survive_chunk_data_resume() {
     );
     assert_eq!(resumed.flat_ocean_floor_height_map, expected_ocean_floor);
 }
+
+/// The chunk `structures` tag has vanilla's layout: the start chunk keeps the monument start
+/// with its pieces, every chunk it reaches lists the start chunk in `References`, and both
+/// chunk formats keep the tag.
+#[test]
+fn structures_tag_matches_vanilla_layout() {
+    use crate::chunk::ChunkData;
+    use pumpkin_config::lighting::LightingEngineConfig;
+    use pumpkin_nbt::tag::NbtTag;
+    use pumpkin_util::math::vector2::Vector2;
+
+    let seed = Seed(1_782_124_772_053_846_960);
+    let world_gen = get_world_gen(seed, Dimension::OVERWORLD, false, Vec::new(), String::new());
+    let WorldGenerator::Noise(generator) = &*world_gen else {
+        unreachable!()
+    };
+    // `ChunkPos.asLong` of (-553, 173)
+    let start_chunk = (i64::from(-553) & 0xFFFF_FFFF) | (i64::from(173) << 32);
+
+    let mut start = ProtoChunk::new(-553, 173, &world_gen);
+    start.step_to_biomes(generator);
+    start.set_structure_starts(generator);
+    start.set_structure_references(generator);
+    let tag = start.structures_tag();
+    let monument = tag
+        .get_compound("starts")
+        .and_then(|starts| starts.get_compound("minecraft:monument"))
+        .expect("monument start");
+    assert_eq!(monument.get_string("id"), Some("minecraft:monument"));
+    assert_eq!(monument.get_int("ChunkX"), Some(-553));
+    assert_eq!(monument.get_int("ChunkZ"), Some(173));
+    assert_eq!(monument.get_int("references"), Some(0));
+    let children = monument.get_list("Children").expect("children");
+    let Some(NbtTag::Compound(building)) = children.first() else {
+        panic!("no monument piece");
+    };
+    assert_eq!(building.get_string("id"), Some("minecraft:omb"));
+    assert!(matches!(building.get("BB"), Some(NbtTag::IntArray(bb)) if bb.len() == 6));
+    assert!(building.get_int("O").is_some_and(|o| (0..4).contains(&o)));
+    assert_eq!(building.get_int("GD"), Some(0));
+    let references = |tag: &pumpkin_nbt::compound::NbtCompound| match tag
+        .get_compound("References")
+        .and_then(|refs| refs.get("minecraft:monument"))
+    {
+        Some(NbtTag::LongArray(chunks)) => chunks.clone(),
+        other => panic!("no monument references: {other:?}"),
+    };
+    assert!(references(&tag).contains(&start_chunk));
+
+    let mut edge = ProtoChunk::new(-553, 174, &world_gen);
+    edge.step_to_biomes(generator);
+    edge.set_structure_starts(generator);
+    edge.set_structure_references(generator);
+    let edge_tag = edge.structures_tag();
+    assert!(
+        edge_tag
+            .get_compound("starts")
+            .is_some_and(|starts| starts.get_compound("minecraft:monument").is_none())
+    );
+    assert_eq!(references(&edge_tag), vec![start_chunk]);
+
+    let mut staged = Chunk::Proto(Box::new(start));
+    staged.upgrade_to_level_chunk(&Dimension::OVERWORLD, &LightingEngineConfig::Default);
+    let Chunk::Level(chunk_data) = staged else {
+        unreachable!()
+    };
+    let stored = chunk_data.structures.lock().unwrap().clone();
+    assert_eq!(stored, tag);
+    let position = Vector2::new(-553, 173);
+    for bytes in [
+        chunk_data.internal_to_bytes(),
+        chunk_data.internal_to_pump_bytes(),
+    ] {
+        let read = ChunkData::internal_from_bytes(&bytes, position).expect("chunk reads back");
+        assert_eq!(*read.structures.lock().unwrap(), tag);
+    }
+}
+
+/// A village start saves its jigsaw pieces with vanilla's `pool_element` codec.
+#[test]
+fn village_start_saves_jigsaw_pieces() {
+    use crate::generation::structure::placement::get_structure_chunk_in_region;
+    use pumpkin_data::structures::{StructurePlacementType, StructureSet};
+    use pumpkin_nbt::tag::NbtTag;
+
+    let seed = Seed(0);
+    let world_gen = get_world_gen(seed, Dimension::OVERWORLD, false, Vec::new(), String::new());
+    let WorldGenerator::Noise(generator) = &*world_gen else {
+        unreachable!()
+    };
+    let set = &StructureSet::VILLAGES;
+    let StructurePlacementType::RandomSpread(spread) = &set.placement.placement_type else {
+        unreachable!()
+    };
+    for region_x in 0..8 {
+        for region_z in 0..8 {
+            let (chunk_x, chunk_z) = get_structure_chunk_in_region(
+                spread,
+                seed.0 as i64,
+                region_x,
+                region_z,
+                set.placement.salt,
+            );
+            let mut proto = ProtoChunk::new(chunk_x, chunk_z, &world_gen);
+            proto.step_to_biomes(generator);
+            proto.set_structure_starts(generator);
+            let tag = proto.structures_tag();
+            let Some(starts) = tag.get_compound("starts") else {
+                continue;
+            };
+            let Some((id, NbtTag::Compound(start))) = starts
+                .child_tags
+                .iter()
+                .find(|(id, _)| id.starts_with("minecraft:village_"))
+            else {
+                continue;
+            };
+            assert_eq!(start.get_string("id"), Some(&**id));
+            let children = start.get_list("Children").expect("children");
+            assert!(!children.is_empty());
+            for child in children {
+                let NbtTag::Compound(piece) = child else {
+                    panic!("piece is not a compound");
+                };
+                assert_eq!(piece.get_string("id"), Some("minecraft:jigsaw"));
+                assert!(piece.get_int("PosX").is_some());
+                assert!(piece.get_string("rotation").is_some());
+                assert!(piece.get_list("junctions").is_some());
+                let element = piece.get_compound("pool_element").expect("pool element");
+                let element_type = element.get_string("element_type").expect("element type");
+                assert!(element_type.starts_with("minecraft:"), "{element_type}");
+                if element_type == "minecraft:single_pool_element"
+                    || element_type == "minecraft:legacy_single_pool_element"
+                {
+                    let location = element.get_string("location").expect("location");
+                    assert!(location.starts_with("minecraft:village/"), "{location}");
+                    assert!(element.get_string("processors").is_some());
+                    assert!(element.get_string("projection").is_some());
+                }
+            }
+            return;
+        }
+    }
+    panic!("no village start found in sampled regions");
+}

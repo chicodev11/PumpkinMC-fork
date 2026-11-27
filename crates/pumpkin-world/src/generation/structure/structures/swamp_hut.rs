@@ -124,6 +124,12 @@ impl SwampHutPiece {
 }
 
 impl StructurePieceBase for SwampHutPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.shiftable_structure_piece.save_scattered(nbt, 9);
+        nbt.put_bool("Witch", self.spawned_witch);
+        nbt.put_bool("Cat", self.spawned_cat);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

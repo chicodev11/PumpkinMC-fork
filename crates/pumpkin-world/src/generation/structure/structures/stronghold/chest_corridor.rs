@@ -57,6 +57,11 @@ impl ChestCorridorPiece {
 }
 
 impl StructurePieceBase for ChestCorridorPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("Chest", self.chest_generated);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

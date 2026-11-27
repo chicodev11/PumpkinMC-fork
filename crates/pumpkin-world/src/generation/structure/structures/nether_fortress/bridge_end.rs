@@ -54,6 +54,10 @@ impl BridgeEndPiece {
 }
 
 impl StructurePieceBase for BridgeEndPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("Seed", self.seed as i32);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -253,6 +253,20 @@ pub struct StrongholdPiece {
 }
 
 impl StrongholdPiece {
+    /// Vanilla `StrongholdPiece.addAdditionalSaveData`: the `EntryDoor` type.
+    pub fn save(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_string(
+            "EntryDoor",
+            match self.entry_door {
+                EntranceType::Opening => "OPENING",
+                EntranceType::WoodDoor => "WOOD_DOOR",
+                EntranceType::Grates => "GRATES",
+                EntranceType::IronDoor => "IRON_DOOR",
+            }
+            .to_string(),
+        );
+    }
+
     #[must_use]
     pub const fn new(r#type: StructurePieceType, chain_length: u32, bbox: BlockBox) -> Self {
         Self {

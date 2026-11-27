@@ -63,6 +63,11 @@ impl PortalRoomPiece {
 }
 
 impl StructurePieceBase for PortalRoomPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("Mob", self.spawner_placed);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

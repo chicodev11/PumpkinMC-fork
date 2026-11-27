@@ -59,6 +59,10 @@ impl PrisonHallPiece {
 }
 
 impl StructurePieceBase for PrisonHallPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -150,6 +150,8 @@ pub struct ProtoChunk {
     pub flat_motion_blocking_no_leaves_height_map: [i16; CHUNK_AREA],
     pub(crate) structure_starts: FxHashMap<StructureKeys, StructureInstance>,
     pub(crate) structure_references: Vec<(StructureKeys, Arc<Mutex<StructurePiecesCollector>>)>,
+    /// The chunks holding the starts in `structure_references`, vanilla's `References`.
+    pub(crate) structure_reference_chunks: Vec<(StructureKeys, i32, i32)>,
 
     height: u16,
     bottom_y: i8,
@@ -265,6 +267,7 @@ impl ProtoChunk {
             flat_motion_blocking_no_leaves_height_map: default_heightmap,
             structure_starts: FxHashMap::default(),
             structure_references: Vec::new(),
+            structure_reference_chunks: Vec::new(),
             height,
             bottom_y,
             generation_height,
@@ -1914,6 +1917,48 @@ impl ProtoChunk {
         false
     }
 
+    /// Vanilla `SerializableChunkData.packStructureData`: the starts this chunk holds, then
+    /// for each structure the chunks whose start reaches into this one (`ChunkPos.asLong`).
+    #[must_use]
+    pub fn structures_tag(&self) -> pumpkin_nbt::compound::NbtCompound {
+        use pumpkin_nbt::compound::NbtCompound;
+        let mut starts = NbtCompound::new();
+        for (key, instance) in &self.structure_starts {
+            if let StructureInstance::Start(pos) = instance {
+                let collector = pos
+                    .collector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if collector.is_empty() {
+                    continue;
+                }
+                let id = format!("minecraft:{}", key.to_name());
+                let start = collector.start_tag(&id, self.x, self.z);
+                starts.put_compound(&id, start);
+            }
+        }
+        let mut grouped: Vec<(StructureKeys, Vec<i64>)> = Vec::new();
+        for &(key, x, z) in &self.structure_reference_chunks {
+            let packed = (i64::from(x) & 0xFFFF_FFFF) | ((i64::from(z) & 0xFFFF_FFFF) << 32);
+            match grouped.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, chunks)) if chunks.contains(&packed) => {}
+                Some((_, chunks)) => chunks.push(packed),
+                None => grouped.push((key, vec![packed])),
+            }
+        }
+        let mut references = NbtCompound::new();
+        for (key, chunks) in grouped {
+            references.put(
+                &format!("minecraft:{}", key.to_name()),
+                pumpkin_nbt::tag::NbtTag::LongArray(chunks),
+            );
+        }
+        let mut tag = NbtCompound::new();
+        tag.put_compound("starts", starts);
+        tag.put_compound("References", references);
+        tag
+    }
+
     /// Adds references to nearby structure starts that intersect this chunk.
     pub fn set_structure_references(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::StructureStart);
@@ -1931,12 +1976,14 @@ impl ProtoChunk {
             &|_| true,
         );
 
-        for (key, start) in references {
+        for (key, start, (start_x, start_z)) in references {
             let pos = start.collector;
             self.structure_starts
                 .entry(key)
                 .or_insert_with(|| StructureInstance::Reference(pos.clone()));
             self.structure_references.push((key, pos));
+            self.structure_reference_chunks
+                .push((key, start_x, start_z));
         }
 
         self.stage = StagedChunkEnum::StructureReferences;
@@ -1952,7 +1999,7 @@ impl ProtoChunk {
         chunk_min_y: i32,
         chunk_height: u16,
         wanted: &dyn Fn(StructureKeys) -> bool,
-    ) -> Vec<(StructureKeys, StructurePosition)> {
+    ) -> Vec<(StructureKeys, StructurePosition, (i32, i32))> {
         let random_config = &generator.random_config;
         let settings = generator.settings;
         let noise_router = &generator.base_router;
@@ -2092,7 +2139,11 @@ impl ProtoChunk {
                                 .get_adjusted_bounding_box(&entry.structure)
                                 .intersects_raw_xz(start_x, start_z, end_x, end_z)
                         {
-                            references.push((entry.structure, start_data));
+                            references.push((
+                                entry.structure,
+                                start_data,
+                                (candidate_chunk_x, candidate_chunk_z),
+                            ));
                         }
                         break;
                     }

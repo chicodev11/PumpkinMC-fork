@@ -55,7 +55,7 @@ impl StructureGenerator for JungleTempleGenerator {
         let mut collector = StructurePiecesCollector::default();
         collector.add_piece(Box::new(JungleTemplePiece {
             piece,
-            height_adjusted: false,
+            h_pos: -1,
             placed_main_chest: false,
             placed_hidden_chest: false,
             placed_trap_1: false,
@@ -71,13 +71,22 @@ impl StructureGenerator for JungleTempleGenerator {
 pub struct JungleTemplePiece {
     // Composition: Rust uses a base struct to mimic the ScatteredFeaturePiece inheritance
     piece: StructurePiece,
-    height_adjusted: bool,
+    /// Vanilla `heightPosition`: the ground height it was moved to, -1 until then.
+    h_pos: i32,
     placed_main_chest: bool,
     placed_hidden_chest: bool,
     placed_trap_1: bool,
     placed_trap_2: bool,
 }
 impl StructurePieceBase for JungleTemplePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_scattered_data(nbt, 12, 10, 15, self.h_pos);
+        nbt.put_bool("placedMainChest", self.placed_main_chest);
+        nbt.put_bool("placedHiddenChest", self.placed_hidden_chest);
+        nbt.put_bool("placedTrap1", self.placed_trap_1);
+        nbt.put_bool("placedTrap2", self.placed_trap_2);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -768,7 +777,7 @@ const fn set_side_dir(props: &mut RedstoneWireLikeProperties, facing: Horizontal
 }
 impl JungleTemplePiece {
     fn adjust_height(&mut self, chunk: &ProtoChunk, random: &mut RandomGenerator) -> bool {
-        if self.height_adjusted {
+        if self.h_pos >= 0 {
             return true;
         }
 
@@ -789,7 +798,7 @@ impl JungleTemplePiece {
 
         let shift_y = lowest - self.piece.bounding_box.min.y + ground_offset;
         self.piece.bounding_box.move_pos(0, shift_y, 0);
-        self.height_adjusted = true;
+        self.h_pos = lowest;
         true
     }
     // This allows you to call MossStoneSelector::next(random) SS is stoneselector

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use pumpkin_data::{Block, BlockId, BlockState};
 use pumpkin_data::{Mirror, Rotation};
+use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::HeightMap;
 use pumpkin_util::{
     BlockDirection,
@@ -81,6 +82,95 @@ pub trait StructurePieceBase: Send + Sync {
         _pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
     ) {
     }
+
+    /// Vanilla `addAdditionalSaveData`: the piece's own fields, written after the common ones.
+    fn save_additional(&self, _nbt: &mut NbtCompound) {}
+
+    /// False for pieces that only exist in Pumpkin, which a saved structure leaves out.
+    fn is_saved(&self) -> bool {
+        true
+    }
+}
+
+/// Vanilla `StructurePiece.createTag`: the registry id, `BB`, `O` (2D facing, -1 for
+/// none) and `GD` (generation depth), then the piece's own fields.
+#[must_use]
+pub fn piece_tag(piece: &dyn StructurePieceBase) -> NbtCompound {
+    let base = piece.get_structure_piece();
+    let mut nbt = NbtCompound::new();
+    nbt.put_string("id", base.r#type.id().to_string());
+    nbt.put("BB", block_box_tag(&base.bounding_box));
+    nbt.put_int("O", base.facing.map_or(-1, direction_2d));
+    nbt.put_int("GD", base.chain_length as i32);
+    piece.save_additional(&mut nbt);
+    nbt
+}
+
+/// Vanilla `BoundingBox.CODEC`: `[minX, minY, minZ, maxX, maxY, maxZ]`.
+#[must_use]
+pub fn block_box_tag(bb: &BlockBox) -> NbtTag {
+    NbtTag::IntArray(vec![
+        bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z,
+    ])
+}
+
+/// Vanilla `Direction.get2DDataValue` (south 0, west 1, north 2, east 3).
+#[must_use]
+pub const fn direction_2d(direction: BlockDirection) -> i32 {
+    match direction {
+        BlockDirection::South => 0,
+        BlockDirection::West => 1,
+        BlockDirection::North => 2,
+        BlockDirection::East => 3,
+        BlockDirection::Down | BlockDirection::Up => -1,
+    }
+}
+
+/// Vanilla `Rotation.LEGACY_CODEC`: the enum constant's name.
+#[must_use]
+pub const fn rotation_name(rotation: Rotation) -> &'static str {
+    match rotation {
+        Rotation::None => "NONE",
+        Rotation::Clockwise90 => "CLOCKWISE_90",
+        Rotation::Rotate180 => "CLOCKWISE_180",
+        Rotation::CounterClockwise90 => "COUNTERCLOCKWISE_90",
+    }
+}
+
+/// Vanilla `Mirror.LEGACY_CODEC`: the enum constant's name.
+#[must_use]
+pub const fn mirror_name(mirror: Mirror) -> &'static str {
+    match mirror {
+        Mirror::None => "NONE",
+        Mirror::LeftRight => "LEFT_RIGHT",
+        Mirror::FrontBack => "FRONT_BACK",
+    }
+}
+
+/// A resource location with the `minecraft` namespace added when it has none.
+#[must_use]
+pub fn namespaced(id: &str) -> String {
+    if id.contains(':') {
+        id.to_string()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
+/// Vanilla `TemplateStructurePiece.addAdditionalSaveData`: `TPX`/`TPY`/`TPZ` and `Template`.
+pub fn put_template_data(nbt: &mut NbtCompound, position: Vector3<i32>, template: &str) {
+    nbt.put_int("TPX", position.x);
+    nbt.put_int("TPY", position.y);
+    nbt.put_int("TPZ", position.z);
+    nbt.put_string("Template", namespaced(template));
+}
+
+/// Vanilla `ScatteredFeaturePiece.addAdditionalSaveData`.
+pub fn put_scattered_data(nbt: &mut NbtCompound, width: i32, height: i32, depth: i32, h_pos: i32) {
+    nbt.put_int("Width", width);
+    nbt.put_int("Height", height);
+    nbt.put_int("Depth", depth);
+    nbt.put_int("HPos", h_pos);
 }
 
 #[derive(Clone)]
@@ -820,6 +910,24 @@ impl StructurePiecesCollector {
 
     pub fn clear(&mut self) {
         self.pieces.clear();
+    }
+
+    /// Vanilla `StructureStart.createTag` for a start in the chunk at `chunk_x`, `chunk_z`.
+    #[must_use]
+    pub fn start_tag(&self, id: &str, chunk_x: i32, chunk_z: i32) -> NbtCompound {
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", id.to_string());
+        nbt.put_int("ChunkX", chunk_x);
+        nbt.put_int("ChunkZ", chunk_z);
+        nbt.put_int("references", 0);
+        let children = self
+            .pieces
+            .iter()
+            .filter(|piece| piece.is_saved())
+            .map(|piece| NbtTag::Compound(piece_tag(piece.as_ref())))
+            .collect();
+        nbt.put_list("Children", children);
+        nbt
     }
 }
 

@@ -224,6 +224,7 @@ const fn relative(position: Vector3<i32>, direction: Direction, distance: i32) -
 struct MansionTemplatePiece {
     piece: StructurePiece,
     template: Arc<StructureTemplate>,
+    template_name: String,
     template_position: Vector3<i32>,
     rotation: Rotation,
     mirror: TemplateMirror,
@@ -231,7 +232,8 @@ struct MansionTemplatePiece {
 
 impl MansionTemplatePiece {
     fn new(descriptor: &PieceDescriptor) -> Option<Self> {
-        let template = get_template(&format!("woodland_mansion/{}", descriptor.template))?;
+        let template_name = format!("woodland_mansion/{}", descriptor.template);
+        let template = get_template(&template_name)?;
         let max = Vector3::new(
             template.size.x - 1,
             template.size.y - 1,
@@ -254,6 +256,7 @@ impl MansionTemplatePiece {
         Some(Self {
             piece: StructurePiece::new(StructurePieceType::WoodlandMansion, bounding_box, 0),
             template,
+            template_name,
             template_position: descriptor.position,
             rotation: descriptor.rotation,
             mirror: descriptor.mirror,
@@ -424,6 +427,27 @@ impl MansionTemplatePiece {
 }
 
 impl StructurePieceBase for MansionTemplatePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            &self.template_name,
+        );
+        nbt.put_string(
+            "Rot",
+            crate::generation::structure::structures::rotation_name(self.rotation).to_string(),
+        );
+        nbt.put_string(
+            "Mi",
+            match self.mirror {
+                TemplateMirror::None => "NONE",
+                TemplateMirror::LeftRight => "LEFT_RIGHT",
+                TemplateMirror::FrontBack => "FRONT_BACK",
+            }
+            .to_string(),
+        );
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -467,6 +491,11 @@ impl MansionFoundationPiece {
 }
 
 impl StructurePieceBase for MansionFoundationPiece {
+    /// Vanilla lays the foundation in `WoodlandMansionStructure.afterPlace`, not as a piece.
+    fn is_saved(&self) -> bool {
+        false
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

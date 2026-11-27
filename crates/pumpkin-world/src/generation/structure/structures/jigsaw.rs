@@ -781,6 +781,67 @@ pub struct JigsawJunction {
     pub projection: JigsawProjection,
 }
 
+/// Vanilla `StructureTemplatePool.Projection` names.
+const fn projection_name(projection: JigsawProjection) -> &'static str {
+    match projection {
+        JigsawProjection::Rigid => "rigid",
+        JigsawProjection::TerrainMatching => "terrain_matching",
+    }
+}
+
+/// Vanilla `StructurePoolElement.CODEC` for a placed piece's element; list entries share the
+/// outer projection, like the pools they come from.
+fn pool_element_tag(
+    kind: &PoolElementKind,
+    projection: JigsawProjection,
+) -> pumpkin_nbt::compound::NbtCompound {
+    use crate::generation::structure::structures::namespaced;
+    let mut tag = pumpkin_nbt::compound::NbtCompound::new();
+    match kind {
+        PoolElementKind::Empty => {
+            tag.put_string("element_type", "minecraft:empty_pool_element".to_string());
+            return tag;
+        }
+        PoolElementKind::Single {
+            template,
+            processors,
+            legacy,
+            ..
+        } => {
+            let element_type = if *legacy {
+                "minecraft:legacy_single_pool_element"
+            } else {
+                "minecraft:single_pool_element"
+            };
+            tag.put_string("element_type", element_type.to_string());
+            tag.put_string("location", namespaced(template));
+            tag.put_string(
+                "processors",
+                match processors {
+                    ProcessorListRef::Named(name) => namespaced(name),
+                    ProcessorListRef::Empty => "minecraft:empty".to_string(),
+                },
+            );
+        }
+        PoolElementKind::List(elements) => {
+            tag.put_string("element_type", "minecraft:list_pool_element".to_string());
+            let elements = elements
+                .iter()
+                .map(|element| {
+                    pumpkin_nbt::tag::NbtTag::Compound(pool_element_tag(element, projection))
+                })
+                .collect();
+            tag.put_list("elements", elements);
+        }
+        PoolElementKind::Feature(feature) => {
+            tag.put_string("element_type", "minecraft:feature_pool_element".to_string());
+            tag.put_string("feature", format!("minecraft:{}", feature.to_name()));
+        }
+    }
+    tag.put_string("projection", projection_name(projection).to_string());
+    tag
+}
+
 pub struct PoolElementStructurePiece {
     pub piece: crate::generation::structure::structures::StructurePiece,
     pub element: Arc<PoolElement>,
@@ -795,6 +856,42 @@ pub struct PoolElementStructurePiece {
 }
 
 impl StructurePieceBase for PoolElementStructurePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("PosX", self.pos.0.x);
+        nbt.put_int("PosY", self.pos.0.y);
+        nbt.put_int("PosZ", self.pos.0.z);
+        nbt.put_int("ground_level_delta", self.ground_level_delta);
+        nbt.put_compound(
+            "pool_element",
+            pool_element_tag(&self.element.kind, self.element.projection),
+        );
+        nbt.put_string(
+            "rotation",
+            crate::generation::structure::structures::rotation_name(self.rotation).to_string(),
+        );
+        let junctions = self
+            .junctions
+            .iter()
+            .map(|junction| {
+                let mut tag = pumpkin_nbt::compound::NbtCompound::new();
+                tag.put_int("source_x", junction.source_x);
+                tag.put_int("source_ground_y", junction.source_ground_y);
+                tag.put_int("source_z", junction.source_z);
+                tag.put_int("delta_y", junction.delta_y);
+                tag.put_string(
+                    "dest_proj",
+                    projection_name(junction.projection).to_string(),
+                );
+                pumpkin_nbt::tag::NbtTag::Compound(tag)
+            })
+            .collect();
+        nbt.put_list("junctions", junctions);
+        // Vanilla only writes liquid settings that differ from `DEFAULT_LIQUID_SETTINGS`.
+        if self.liquid_settings != LiquidSettings::ApplyWaterlog {
+            nbt.put_string("liquid_settings", "ignore_waterlogging".to_string());
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

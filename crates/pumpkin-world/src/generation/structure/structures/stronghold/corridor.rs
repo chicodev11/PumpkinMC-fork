@@ -85,6 +85,12 @@ impl CorridorPiece {
 }
 
 impl StructurePieceBase for CorridorPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("Left", self.left_exit);
+        nbt.put_bool("Right", self.right_exit);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -214,6 +220,11 @@ impl SmallCorridorPiece {
 }
 
 impl StructurePieceBase for SmallCorridorPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_int("Steps", self.length);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -571,6 +571,18 @@ impl MineShaftRoom {
 }
 
 impl StructurePieceBase for MineShaftRoom {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("MST", self.shaft_type as i32);
+        let entrances = self
+            .child_entrance_boxes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(crate::generation::structure::structures::block_box_tag)
+            .collect();
+        nbt.put_list("Entrances", entrances);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -1298,6 +1310,14 @@ impl MineShaftCorridor {
 }
 
 impl StructurePieceBase for MineShaftCorridor {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("MST", self.shaft_type as i32);
+        nbt.put_bool("hr", self.has_rails);
+        nbt.put_bool("sc", self.spider_corridor);
+        nbt.put_bool("hps", self.has_placed_spider);
+        nbt.put_int("Num", self.num_sections);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -1733,6 +1753,16 @@ impl MineShaftCrossing {
 }
 
 impl StructurePieceBase for MineShaftCrossing {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("MST", self.shaft_type as i32);
+        nbt.put_bool("tf", self.is_two_floored);
+        nbt.put_int(
+            "D",
+            self.direction
+                .map_or(-1, crate::generation::structure::structures::direction_2d),
+        );
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -1970,6 +2000,10 @@ impl MineShaftStairs {
 }
 
 impl StructurePieceBase for MineShaftStairs {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("MST", self.shaft_type as i32);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

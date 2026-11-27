@@ -305,6 +305,19 @@ impl IglooPiece {
 }
 
 impl StructurePieceBase for IglooPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            &self.template_name,
+        );
+        nbt.put_string(
+            "Rot",
+            crate::generation::structure::structures::rotation_name(self.place_settings.rotation)
+                .to_string(),
+        );
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

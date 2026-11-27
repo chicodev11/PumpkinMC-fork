@@ -93,6 +93,14 @@ impl FiveWayCrossingPiece {
 }
 
 impl StructurePieceBase for FiveWayCrossingPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("leftLow", self.lower_left_exists);
+        nbt.put_bool("leftHigh", self.upper_left_exists);
+        nbt.put_bool("rightLow", self.lower_right_exists);
+        nbt.put_bool("rightHigh", self.upper_right_exists);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

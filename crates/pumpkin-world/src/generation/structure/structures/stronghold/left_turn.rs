@@ -53,6 +53,10 @@ impl LeftTurnPiece {
 }
 
 impl StructurePieceBase for LeftTurnPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -53,7 +53,7 @@ impl StructureGenerator for DesertPyramidGenerator {
         let mut collector = StructurePiecesCollector::default();
         collector.add_piece(Box::new(DesertPyramidPiece {
             piece,
-            height_adjusted: false,
+            h_pos: -1,
             has_placed_chest: [false; 4],
         }));
 
@@ -66,7 +66,8 @@ impl StructureGenerator for DesertPyramidGenerator {
 
 pub struct DesertPyramidPiece {
     piece: StructurePiece,
-    height_adjusted: bool,
+    /// Vanilla `heightPosition`: the ground height it was moved to, -1 until then.
+    h_pos: i32,
     has_placed_chest: [bool; 4],
 }
 
@@ -78,7 +79,7 @@ impl DesertPyramidPiece {
     }
 
     fn adjust_height(&mut self, chunk: &ProtoChunk, random: &mut RandomGenerator) -> bool {
-        if self.height_adjusted {
+        if self.h_pos >= 0 {
             return true;
         }
 
@@ -99,7 +100,7 @@ impl DesertPyramidPiece {
 
         let shift_y = lowest - self.piece.bounding_box.min.y + ground_offset;
         self.piece.bounding_box.move_pos(0, shift_y, 0);
-        self.height_adjusted = true;
+        self.h_pos = lowest;
         true
     }
 
@@ -519,6 +520,13 @@ impl DesertPyramidPiece {
 }
 
 impl StructurePieceBase for DesertPyramidPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_scattered_data(nbt, 21, 15, 21, self.h_pos);
+        for (i, placed) in self.has_placed_chest.iter().enumerate() {
+            nbt.put_bool(&format!("hasPlacedChest{i}"), *placed);
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -53,6 +53,10 @@ impl CorridorRightTurnPiece {
 }
 
 impl StructurePieceBase for CorridorRightTurnPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_bool("Chest", self.contains_chest);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

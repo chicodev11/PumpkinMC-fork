@@ -104,6 +104,11 @@ impl SpiralStaircasePiece {
 }
 
 impl StructurePieceBase for SpiralStaircasePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("Source", self.is_structure_start);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -407,6 +407,24 @@ impl OceanRuinPiece {
 }
 
 impl StructurePieceBase for OceanRuinPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            &self.template_name,
+        );
+        nbt.put_string(
+            "Rot",
+            crate::generation::structure::structures::rotation_name(self.rotation).to_string(),
+        );
+        nbt.put_float("Integrity", self.integrity);
+        nbt.put_string(
+            "BiomeType",
+            if self.is_warm { "WARM" } else { "COLD" }.to_string(),
+        );
+        nbt.put_bool("IsLarge", self.is_large);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

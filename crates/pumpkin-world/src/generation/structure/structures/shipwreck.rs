@@ -111,7 +111,8 @@ impl StructureGenerator for ShipwreckGenerator {
         let template_name = pool[template_idx];
         let template = get_template(template_name)?;
 
-        let mut piece = ShipwreckPiece::new(template, position, rotation, self.is_beached);
+        let mut piece =
+            ShipwreckPiece::new(template, template_name, position, rotation, self.is_beached);
 
         if piece.is_too_big_to_fit_in_world_gen_region() {
             let bb = piece.piece.bounding_box;
@@ -150,6 +151,7 @@ impl StructureGenerator for ShipwreckGenerator {
 pub struct ShipwreckPiece {
     piece: StructurePiece,
     template: Arc<StructureTemplate>,
+    template_name: &'static str,
     rotation: Rotation,
     template_position: Vector3<i32>,
     is_beached: bool,
@@ -160,6 +162,7 @@ impl ShipwreckPiece {
     #[must_use]
     pub fn new(
         template: Arc<StructureTemplate>,
+        template_name: &'static str,
         position: Vector3<i32>,
         rotation: Rotation,
         is_beached: bool,
@@ -175,6 +178,7 @@ impl ShipwreckPiece {
         Self {
             piece: StructurePiece::new(StructurePieceType::Shipwreck, bounding_box, 0),
             template,
+            template_name,
             rotation,
             template_position: position,
             is_beached,
@@ -245,6 +249,20 @@ impl ShipwreckPiece {
 }
 
 impl StructurePieceBase for ShipwreckPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            self.template_name,
+        );
+        nbt.put_bool("isBeached", self.is_beached);
+        nbt.put_string(
+            "Rot",
+            crate::generation::structure::structures::rotation_name(self.rotation).to_string(),
+        );
+        nbt.put_bool("height_adjusted", self.height_adjusted);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

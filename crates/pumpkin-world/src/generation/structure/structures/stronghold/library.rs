@@ -64,6 +64,11 @@ impl LibraryPiece {
 }
 
 impl StructurePieceBase for LibraryPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_bool("Tall", self.tall);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

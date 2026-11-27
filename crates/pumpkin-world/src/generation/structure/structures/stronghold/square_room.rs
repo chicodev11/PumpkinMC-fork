@@ -65,6 +65,11 @@ impl SquareRoomPiece {
 }
 
 impl StructurePieceBase for SquareRoomPiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.piece.save(nbt);
+        nbt.put_int("Type", self.room_type as i32);
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

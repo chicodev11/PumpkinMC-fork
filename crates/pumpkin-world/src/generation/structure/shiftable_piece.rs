@@ -42,6 +42,18 @@ impl ShiftableStructurePiece {
         }
     }
 
+    /// Vanilla `ScatteredFeaturePiece.addAdditionalSaveData`; `depth` is the piece's
+    /// unrotated depth, which this piece does not keep.
+    pub fn save_scattered(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound, depth: i32) {
+        crate::generation::structure::structures::put_scattered_data(
+            nbt,
+            self.width,
+            self.height,
+            depth,
+            self.h_pos,
+        );
+    }
+
     pub fn adjust_to_average_height(&mut self, chunk: &ProtoChunk) -> bool {
         let bounding_box = self.piece.bounding_box;
         if self.h_pos >= 0 {

@@ -275,6 +275,14 @@ impl TemplatePiece {
 }
 
 impl StructurePieceBase for TemplatePiece {
+    fn save_additional(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        crate::generation::structure::structures::put_template_data(
+            nbt,
+            self.template_position,
+            &self.template_name,
+        );
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
