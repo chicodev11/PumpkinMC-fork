@@ -40,7 +40,7 @@ pub async fn run_custom_block_plugin_test(
     player.set_gamemode(original_mode);
     result?;
     summary_lines.push(
-        "[PASS] bot:custom_block_plugin (register, use and drops callbacks, nested event)"
+        "[PASS] bot:custom_block_plugin (register, use and drops callbacks, nested event, death drops)"
             .to_string(),
     );
     Ok(())
@@ -152,6 +152,47 @@ async fn run_inner(
     if dropped != ["diamond"] {
         return Err(format!(
             "the drops callback gave {dropped:?}, expected one diamond"
+        ));
+    }
+    // MythicMobs-style drops: the plugin's death handler replaces a tagged zombie's drops.
+    let zombie = pumpkin_core::entity::r#type::from_type(
+        &pumpkin_data::entity::EntityType::ZOMBIE,
+        pos.to_centered_f64(),
+        &world,
+        uuid::Uuid::new_v4(),
+    );
+    zombie.get_entity().add_scoreboard_tag("addon_smoke_drops");
+    world.spawn_entity(zombie.clone());
+    tick(server, 1).await;
+    zombie.kill(zombie.as_ref());
+    let mut emeralds = 0;
+    for _ in 0..40 {
+        tick(server, 1).await;
+        for entity in world.get_entities_at_box(&area) {
+            if let Some(item) = entity.get_item_entity() {
+                let stack = item
+                    .get_item_stack()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if stack.item.registry_key == "emerald" {
+                    emeralds += stack.item_count;
+                } else {
+                    return Err(format!(
+                        "the death handler left {} in the zombie's drops",
+                        stack.item.registry_key
+                    ));
+                }
+                entity.get_entity().remove();
+            }
+        }
+        if emeralds > 0 {
+            break;
+        }
+    }
+    if emeralds != 3 {
+        return Err(format!(
+            "the zombie dropped {emeralds} emeralds, expected 3"
         ));
     }
     Ok(())
