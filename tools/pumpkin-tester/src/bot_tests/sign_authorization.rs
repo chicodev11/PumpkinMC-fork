@@ -145,6 +145,10 @@ async fn move_to_and_wait(
     bot.move_to(target, true).await?;
     for _ in 0..MAX_POLL_TICKS {
         tick(server, 1).await;
+        // A teleport sent meanwhile makes the server drop the move; confirm it and resend.
+        if bot.confirm_pending_teleports().await? > 0 {
+            bot.move_to(target, true).await?;
+        }
         let pos = player.get_entity().pos.load();
         if (pos.x - target.x).abs() < 0.5 && (pos.z - target.z).abs() < 0.5 {
             return Ok(());

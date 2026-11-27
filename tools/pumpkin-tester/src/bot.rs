@@ -31,6 +31,7 @@ use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use tokio::{
     io::{AsyncWrite, BufReader, BufWriter},
     net::TcpStream,
+    sync::mpsc::{UnboundedReceiver, error::TryRecvError, unbounded_channel},
     time::timeout,
 };
 use uuid::Uuid;
@@ -40,7 +41,9 @@ pub const MAX_POLL_TICKS: usize = 500;
 
 pub struct HeadlessBot {
     pub name: String,
-    pub reader: TCPNetworkDecoder<BufReader<JavaReadHalf>>,
+    /// Only present while joining; afterwards a background task owns it and feeds `incoming`.
+    reader: Option<TCPNetworkDecoder<BufReader<JavaReadHalf>>>,
+    incoming: Option<UnboundedReceiver<Result<RawPacket, String>>>,
     pub writer: TCPNetworkEncoder<BufWriter<JavaWriteHalf>>,
     pub position: Vector3<f64>,
     pub yaw: f32,
@@ -56,13 +59,81 @@ impl HeadlessBot {
     }
 
     pub async fn next_packet(&mut self) -> Result<RawPacket, String> {
-        match timeout(PACKET_TIMEOUT, self.reader.get_raw_packet()).await {
+        let name = &self.name;
+        let timed_out = || format!("Bot '{name}' timed out waiting for packet from server");
+        if let Some(incoming) = self.incoming.as_mut() {
+            return match timeout(PACKET_TIMEOUT, incoming.recv()).await {
+                Ok(Some(packet)) => packet,
+                Ok(None) => Err(format!("Bot '{name}' connection closed")),
+                Err(_) => Err(timed_out()),
+            };
+        }
+        let reader = self
+            .reader
+            .as_mut()
+            .ok_or_else(|| format!("Bot '{name}' has no packet reader"))?;
+        match timeout(PACKET_TIMEOUT, reader.get_raw_packet()).await {
             Ok(Ok(packet)) => Ok(packet),
-            Ok(Err(err)) => Err(format!("Bot '{}' packet decode error: {err}", self.name)),
-            Err(_) => Err(format!(
-                "Bot '{}' timed out waiting for packet from server",
-                self.name
-            )),
+            Ok(Err(err)) => Err(format!("Bot '{name}' packet decode error: {err}")),
+            Err(_) => Err(timed_out()),
+        }
+    }
+
+    /// Hands the socket to a background task so packets can be drained without a blocking read
+    /// (a read cancelled halfway through a packet would lose bytes).
+    fn start_background_reader(&mut self) {
+        let Some(mut reader) = self.reader.take() else {
+            return;
+        };
+        let (sender, receiver) = unbounded_channel();
+        self.incoming = Some(receiver);
+        let name = self.name.clone();
+        tokio::spawn(async move {
+            loop {
+                let packet = reader
+                    .get_raw_packet()
+                    .await
+                    .map_err(|err| format!("Bot '{name}' packet decode error: {err}"));
+                let failed = packet.is_err();
+                if sender.send(packet).is_err() || failed {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Confirms every teleport the server has sent since the last call and returns how many
+    /// there were. Like a vanilla client, the bot must do this: while a teleport is unconfirmed
+    /// the server (vanilla `handlePlayerPositionChange`) ignores the client's position, so a
+    /// move sent in that window is silently dropped. Callers should resend such a move.
+    pub async fn confirm_pending_teleports(&mut self) -> Result<usize, String> {
+        let player_pos_id = CPlayerPosition::to_id(CURRENT_MC_VERSION);
+        let mut confirmed = 0;
+        loop {
+            let packet = match self.incoming.as_mut().map(UnboundedReceiver::try_recv) {
+                Some(Ok(packet)) => packet?,
+                Some(Err(TryRecvError::Disconnected)) => {
+                    return Err(format!("Bot '{}' connection closed", self.name));
+                }
+                Some(Err(TryRecvError::Empty)) | None => return Ok(confirmed),
+            };
+            if packet.id != player_pos_id {
+                continue;
+            }
+            let mut slice = &packet.payload[..];
+            let pos_pkt = CPlayerPosition::read(&mut slice, &CURRENT_MC_VERSION)
+                .map_err(|err| format!("Failed to read CPlayerPosition: {err}"))?;
+            self.position = pos_pkt.position;
+            self.yaw = pos_pkt.yaw;
+            self.pitch = pos_pkt.pitch;
+            self.send_packet(&SConfirmTeleport {
+                teleport_id: pos_pkt.teleport_id,
+                position: pos_pkt.position,
+                yaw: pos_pkt.yaw,
+                pitch: pos_pkt.pitch,
+            })
+            .await?;
+            confirmed += 1;
         }
     }
 
@@ -83,7 +154,8 @@ impl HeadlessBot {
     ) -> Result<Self, String> {
         let mut bot = Self {
             name: name.to_string(),
-            reader: TCPNetworkDecoder::new(BufReader::new(read_half)),
+            reader: Some(TCPNetworkDecoder::new(BufReader::new(read_half))),
+            incoming: None,
             writer: TCPNetworkEncoder::new(BufWriter::new(write_half)),
             position: Vector3::new(0.0, 0.0, 0.0),
             yaw: 0.0,
@@ -173,34 +245,8 @@ impl HeadlessBot {
             }
         }
 
+        bot.start_background_reader();
         Ok(bot)
-    }
-
-    /// Reads what the server has sent so far and confirms every teleport in it, like a real
-    /// client. The server ignores movement while a teleport is unconfirmed.
-    pub async fn confirm_pending_teleports(&mut self) -> Result<(), String> {
-        let player_pos_id = CPlayerPosition::to_id(CURRENT_MC_VERSION);
-        while let Ok(packet) =
-            timeout(Duration::from_millis(50), self.reader.get_raw_packet()).await
-        {
-            let packet =
-                packet.map_err(|err| format!("Bot '{}' packet decode error: {err}", self.name))?;
-            if packet.id != player_pos_id {
-                continue;
-            }
-            let mut slice = &packet.payload[..];
-            let pos_pkt = CPlayerPosition::read(&mut slice, &CURRENT_MC_VERSION)
-                .map_err(|err| format!("Failed to read CPlayerPosition: {err}"))?;
-            self.position = pos_pkt.position;
-            self.send_packet(&SConfirmTeleport {
-                teleport_id: pos_pkt.teleport_id,
-                position: pos_pkt.position,
-                yaw: pos_pkt.yaw,
-                pitch: pos_pkt.pitch,
-            })
-            .await?;
-        }
-        Ok(())
     }
 
     pub async fn move_to(&mut self, position: Vector3<f64>, on_ground: bool) -> Result<(), String> {

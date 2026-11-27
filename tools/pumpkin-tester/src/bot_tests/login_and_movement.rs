@@ -10,6 +10,8 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::bot::{HeadlessBot, MAX_POLL_TICKS};
 
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub async fn run_login_and_movement_tests(
     server: &Arc<Server>,
     addr: SocketAddr,
@@ -21,7 +23,7 @@ pub async fn run_login_and_movement_tests(
         HeadlessBot::connect_and_join(addr, "TestBot2"),
     );
     let mut bot1 = bot1_res?;
-    let bot2 = bot2_res?;
+    let bot2_joined = bot2_res?;
 
     let mut bots_joined = false;
     for _ in 0..MAX_POLL_TICKS {
@@ -44,6 +46,37 @@ pub async fn run_login_and_movement_tests(
         join_start.elapsed().as_millis()
     ));
 
+    let world = server.get_world_from_dimension(&Dimension::OVERWORLD);
+
+    // The server only reads a bot's packets once its join has finished, which can take longer
+    // than the tick loop above. Until it has applied the join teleport confirmation it ignores
+    // position packets (like vanilla), so drive ticks until both bots are confirmed.
+    let mut bot2 = bot2_joined;
+    let confirm_deadline = Instant::now() + CONFIRM_TIMEOUT;
+    loop {
+        server.tick();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        bot1.confirm_pending_teleports().await?;
+        bot2.confirm_pending_teleports().await?;
+        let pending = ["TestBot1", "TestBot2"].iter().any(|name| {
+            world.get_player_by_name(name).is_none_or(|player| {
+                player
+                    .awaiting_teleport
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some()
+            })
+        });
+        if !pending {
+            break;
+        }
+        if Instant::now() > confirm_deadline {
+            return Err(
+                "Bots joined but the server never applied their teleport confirmation".to_string(),
+            );
+        }
+    }
+
     let move_start = Instant::now();
     let target_pos = Vector3::new(
         bot1.position.x + 1.5,
@@ -52,11 +85,14 @@ pub async fn run_login_and_movement_tests(
     );
     bot1.move_to(target_pos, true).await?;
 
-    let world = server.get_world_from_dimension(&Dimension::OVERWORLD);
     let mut bot_moved = false;
     for _ in 0..MAX_POLL_TICKS {
         tokio::time::sleep(Duration::from_millis(5)).await;
         server.tick();
+        // A teleport sent meanwhile makes the server drop the move; confirm it and resend.
+        if bot1.confirm_pending_teleports().await? > 0 {
+            bot1.move_to(target_pos, true).await?;
+        }
         if let Some(player1) = world.get_player_by_name("TestBot1") {
             let actual_pos = player1.living_entity.entity.pos.load();
             if (actual_pos.x - target_pos.x).abs() < 0.01
