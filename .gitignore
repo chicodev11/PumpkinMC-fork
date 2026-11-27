@@ -150,6 +150,7 @@ banned-ips.json
 banned-players.json
 eula.txt
 ops.json
+permissions.json
 server.properties
 usercache.json
 whitelist.json

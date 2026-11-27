@@ -141,6 +141,7 @@ async fn move_to_and_wait(
     player: &pumpkin_core::entity::player::Player,
     target: Vector3<f64>,
 ) -> Result<(), String> {
+    bot.confirm_pending_teleports().await?;
     bot.move_to(target, true).await?;
     for _ in 0..MAX_POLL_TICKS {
         tick(server, 1).await;
@@ -149,7 +150,13 @@ async fn move_to_and_wait(
             return Ok(());
         }
     }
-    Err("bot did not reach the requested position".to_string())
+    Err(format!(
+        "bot did not reach the requested position: target {target:?}, at {:?}, teleport pending {}, loaded {}, locked {}",
+        player.get_entity().pos.load(),
+        player.awaiting_teleport.lock().unwrap().is_some(),
+        player.has_client_loaded(),
+        player.is_movement_locked.load(Ordering::Relaxed)
+    ))
 }
 
 async fn place_sign(server: &Arc<Server>, world: &pumpkin_core::world::World, pos: BlockPos) {
@@ -559,6 +566,9 @@ pub async fn run_sign_authorization_tests(
     let dispatcher = server.command_dispatcher.load();
     player.set_permission_lvl(server, PermissionLvl::Zero, &dispatcher);
     player.set_gamemode(GameMode::Survival);
+    // The server may teleport a fresh player again after the join sync (an obstructed spawn).
+    tick(server, 5).await;
+    bot.confirm_pending_teleports().await?;
 
     let base = BlockPos::new(
         bot.position.x.floor() as i32,

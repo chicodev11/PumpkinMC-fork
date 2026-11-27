@@ -176,6 +176,33 @@ impl HeadlessBot {
         Ok(bot)
     }
 
+    /// Reads what the server has sent so far and confirms every teleport in it, like a real
+    /// client. The server ignores movement while a teleport is unconfirmed.
+    pub async fn confirm_pending_teleports(&mut self) -> Result<(), String> {
+        let player_pos_id = CPlayerPosition::to_id(CURRENT_MC_VERSION);
+        while let Ok(packet) =
+            timeout(Duration::from_millis(50), self.reader.get_raw_packet()).await
+        {
+            let packet =
+                packet.map_err(|err| format!("Bot '{}' packet decode error: {err}", self.name))?;
+            if packet.id != player_pos_id {
+                continue;
+            }
+            let mut slice = &packet.payload[..];
+            let pos_pkt = CPlayerPosition::read(&mut slice, &CURRENT_MC_VERSION)
+                .map_err(|err| format!("Failed to read CPlayerPosition: {err}"))?;
+            self.position = pos_pkt.position;
+            self.send_packet(&SConfirmTeleport {
+                teleport_id: pos_pkt.teleport_id,
+                position: pos_pkt.position,
+                yaw: pos_pkt.yaw,
+                pitch: pos_pkt.pitch,
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn move_to(&mut self, position: Vector3<f64>, on_ground: bool) -> Result<(), String> {
         self.position = position;
         self.send_packet(&SPlayerPosition {
