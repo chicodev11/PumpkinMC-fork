@@ -387,7 +387,12 @@ pub fn hurt_and_throw_target(body: &dyn Mob, target: &dyn EntityBase) -> bool {
         Some(entity),
     );
     if hurt {
-        EnchantmentHelper::on_post_attack(body, target.get_entity(), &living.held_item(body));
+        EnchantmentHelper::on_post_attack(
+            body,
+            target,
+            &living.held_item(body),
+            DamageType::MOB_ATTACK,
+        );
         if !living.is_baby() {
             throw_target(living, target);
         }

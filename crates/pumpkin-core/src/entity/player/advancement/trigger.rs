@@ -1,7 +1,6 @@
 use crate::entity::player::Player;
 use crate::entity::player::advancement::PlayerAdvancement;
 use crate::entity::player::advancement::predicate::{self, CriterionConditions};
-use pumpkin_data::effect::StatusEffect;
 use pumpkin_util::math::position::BlockPos;
 
 #[derive(Debug, Clone)]

@@ -10,7 +10,7 @@ use pumpkin_data::entity_variant::AxolotlVariant;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
-use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
@@ -443,6 +443,63 @@ impl AxolotlEntity {
     }
 }
 
+impl crate::entity::bucketable::Bucketable for AxolotlEntity {
+    fn is_from_bucket(&self) -> bool {
+        Self::is_from_bucket(self)
+    }
+
+    fn set_from_bucket(&self, from_bucket: bool) {
+        Self::set_from_bucket(self, from_bucket);
+    }
+
+    fn bucket_item(&self) -> &'static Item {
+        &Item::AXOLOTL_BUCKET
+    }
+
+    fn pickup_sound(&self) -> Sound {
+        Sound::ItemBucketFillAxolotl
+    }
+
+    /// Vanilla `Axolotl.saveToBucketTag`: variant, age, age lock and the hunting cooldown.
+    fn save_to_bucket_tag(&self, bucket: &mut ItemStack) {
+        use pumpkin_data::data_component_impl::{AxolotlVariantImpl, BucketEntityDataImpl};
+        self.save_default_data_to_bucket_tag(bucket);
+        bucket.set_data_component(AxolotlVariantImpl {
+            value: self.get_variant().name().into(),
+        });
+        let mut nbt = bucket
+            .get_data_component::<BucketEntityDataImpl>()
+            .and_then(|data| data.nbt.clone())
+            .unwrap_or_default();
+        nbt.put_int("Age", AgeableMob::get_age(self));
+        nbt.put_bool(
+            "AgeLocked",
+            self.ageable_data.age_locked.load(Ordering::Relaxed),
+        );
+        if let Some(ticks) = self.mob_entity.with_brain(self, |brain| {
+            brain.time_until_expiry(types::HAS_HUNTING_COOLDOWN.id())
+        }) {
+            nbt.put_long("HuntingCooldown", ticks);
+        }
+        bucket.set_data_component(BucketEntityDataImpl { nbt: Some(nbt) });
+    }
+
+    /// Vanilla `Axolotl.loadFromBucketTag`.
+    fn load_from_bucket_tag(&self, nbt: &NbtCompound) {
+        self.load_default_data_from_bucket_tag(nbt);
+        AgeableMob::set_age(self, nbt.get_int("Age").unwrap_or(0));
+        self.ageable_data.age_locked.store(
+            nbt.get_bool("AgeLocked").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.mob_entity
+            .with_brain(self, |brain| match nbt.get_long("HuntingCooldown") {
+                Some(ticks) => brain.set_with_expiry(types::HAS_HUNTING_COOLDOWN, true, ticks),
+                None => brain.erase(types::HAS_HUNTING_COOLDOWN.id()),
+            });
+    }
+}
+
 impl AgeableMob for AxolotlEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
@@ -496,6 +553,10 @@ impl Animal for AxolotlEntity {
 }
 
 impl Mob for AxolotlEntity {
+    fn as_bucketable(&self) -> Option<&dyn crate::entity::bucketable::Bucketable> {
+        Some(self)
+    }
+
     fn as_ageable(&self) -> Option<&dyn AgeableMob> {
         Some(self)
     }
@@ -705,28 +766,11 @@ impl Mob for AxolotlEntity {
     }
 
     fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
-        let item = item_stack.get_item();
-
-        if item == &Item::WATER_BUCKET {
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            if let Some(server) = world.server.upgrade() {
-                let mut event = crate::plugin::api::events::player::player_bucket_entity::PlayerBucketEntityEvent {
-                    player: player.clone(),
-                    entity_id: entity.entity_id,
-                    bucket_item: "axolotl_bucket".to_string(),
-                    cancelled: false,
-                };
-                server.plugin_manager.fire_blocking(&server, &mut event);
-                if event.cancelled {
-                    return false;
-                }
-            }
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-            let pos = entity.pos.load();
-            world.play_sound(Sound::ItemBucketFillAxolotl, SoundCategory::Neutral, &pos);
-            entity.remove();
-            return true;
+        // Vanilla `Bucketable.bucketMobPickup`.
+        if let Some(handled) =
+            crate::entity::bucketable::bucket_mob_pickup(player, item_stack, self)
+        {
+            return handled;
         }
 
         self.animal_interact(player, item_stack)

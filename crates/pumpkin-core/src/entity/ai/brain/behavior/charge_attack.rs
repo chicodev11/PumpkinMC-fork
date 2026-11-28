@@ -70,8 +70,9 @@ impl ChargeAttack {
         ) {
             EnchantmentHelper::on_post_attack(
                 tick.mob,
-                target.get_entity(),
+                target,
                 &living.held_item(tick.mob),
+                DamageType::MOB_ATTACK,
             );
         }
     }

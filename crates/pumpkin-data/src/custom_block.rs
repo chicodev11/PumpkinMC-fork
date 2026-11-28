@@ -966,6 +966,8 @@ fn insert_block(
         item_id: def.item_id,
         default_state,
         states,
+        // Custom properties are not vanilla `Property` values; they live in `CustomBlockInfo`.
+        property_slots: &[],
         flammable: def.flammable.map(|(spread_chance, burn_chance)| Flammable {
             spread_chance,
             burn_chance,

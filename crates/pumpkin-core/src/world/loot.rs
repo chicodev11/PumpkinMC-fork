@@ -348,7 +348,9 @@ pub(crate) fn test_loot_condition(
         .tool
         .as_ref()
         .is_some_and(|tool| tool.item.id == pumpkin_data::item::Item::SHEARS.id);
-    let mut rng = Xoroshiro::from_seed(rand::random());
+    let mut rng = RandomGenerator::Xoroshiro(
+        pumpkin_util::random::xoroshiro128::Xoroshiro::from_seed(rand::random()),
+    );
     check_condition(condition, has_silk_touch, has_shears, params, &mut rng)
 }
 

@@ -10646,8 +10646,7 @@ mod tests {
             TelemetryConfig::default(),
             VanillaData::default(),
             vec![],
-        )
-        .await?;
+        )?;
         let world = server.worlds.load().first().cloned().ok_or("No world")?;
         let (transport, peer) = tokio::io::duplex(8192);
         let (read, write) = tokio::io::split(transport);

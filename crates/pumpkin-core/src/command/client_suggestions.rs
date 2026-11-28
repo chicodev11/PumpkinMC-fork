@@ -603,7 +603,8 @@ mod tests {
         }
     }
 
-    async fn test_server_and_player() -> Result<
+    #[expect(clippy::type_complexity, reason = "test fixture tuple")]
+    fn test_server_and_player() -> Result<
         (
             tempfile::TempDir,
             Arc<Server>,
@@ -631,8 +632,7 @@ mod tests {
             TelemetryConfig::default(),
             VanillaData::default(),
             vec![],
-        )
-        .await?;
+        )?;
         let world = server.worlds.load().first().cloned().ok_or("No world")?;
         let (transport, peer) = tokio::io::duplex(65536);
         let (read, write) = tokio::io::split(transport);
@@ -667,7 +667,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn command_send_event_filters_root_commands_without_adding_unpermitted_ones()
     -> Result<(), Box<dyn std::error::Error>> {
-        let (_dir, server, player, peer) = test_server_and_player().await?;
+        let (_dir, server, player, peer) = test_server_and_player()?;
 
         let mut dispatcher = CommandDispatcher::default();
         dispatcher.register(command("allowed_cmd", "allowed").executes(NoopExecutor));
@@ -718,7 +718,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn command_preprocess_event_can_cancel_or_rewrite_commands()
     -> Result<(), Box<dyn std::error::Error>> {
-        let (_dir, server, player, _peer) = test_server_and_player().await?;
+        let (_dir, server, player, _peer) = test_server_and_player()?;
 
         let executions = Arc::new(AtomicUsize::new(0));
         server.command_dispatcher.rcu(|dispatcher| {

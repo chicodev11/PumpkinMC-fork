@@ -102,7 +102,7 @@ impl Behavior for FollowTemptation {
         }
     }
 
-    fn stop(&mut self, tick: &mut BrainTick<'_>, _timed_out: bool) {
+    fn stop(&mut self, tick: &mut BrainTick<'_>) {
         tick.state
             .set(types::TEMPTATION_COOLDOWN_TICKS, TEMPTATION_COOLDOWN);
         tick.state.erase(types::WALK_TARGET.id());

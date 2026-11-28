@@ -2502,7 +2502,7 @@ mod tests {
         );
     }
 
-    async fn test_server(world_dir: &std::path::Path) -> std::sync::Arc<crate::server::Server> {
+    fn test_server(world_dir: &std::path::Path) -> std::sync::Arc<crate::server::Server> {
         use pumpkin_config::{AdvancedConfiguration, BasicConfiguration, TelemetryConfig};
         use pumpkin_util::world_seed::Seed;
 
@@ -2542,14 +2542,13 @@ mod tests {
             vanilla_data,
             Vec::new(),
         )
-        .await
         .expect("the test server must start")
     }
 
     #[tokio::test]
     async fn fans_out_through_dispatcher_and_hits_the_command_chain_limit() {
         let world_dir = tempfile::tempdir().expect("tempdir");
-        let server = test_server(world_dir.path()).await;
+        let server = test_server(world_dir.path());
 
         // Fan-out under the depth cap: each level spends its budget on leaf lines
         // before the recursive call, so the command budget trips first.
@@ -2573,7 +2572,7 @@ mod tests {
     #[tokio::test]
     async fn recurse_through_dispatcher_and_hit_the_depth_limit() {
         let world_dir = tempfile::tempdir().expect("tempdir");
-        let server = test_server(world_dir.path()).await;
+        let server = test_server(world_dir.path());
 
         server
             .datapack_manager

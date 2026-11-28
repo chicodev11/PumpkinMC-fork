@@ -1174,7 +1174,7 @@ pub fn map_color(state: BlockStateId) -> u8 {
 
 /// The fluid block of a state that holds water or lava, `None` otherwise.
 fn fluid_block(state: BlockStateId) -> Option<&'static Block> {
-    let fluid = World::get_fluid_from_state_id(state);
+    let fluid = pumpkin_data::fluid::Fluid::of_block_state(state);
     if fluid.matches_type(&pumpkin_data::fluid::Fluid::WATER) {
         Some(&Block::WATER)
     } else if fluid.matches_type(&pumpkin_data::fluid::Fluid::LAVA) {

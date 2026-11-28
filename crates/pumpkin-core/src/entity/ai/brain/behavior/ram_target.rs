@@ -165,8 +165,9 @@ impl Behavior for RamTarget {
             ) {
                 EnchantmentHelper::on_post_attack(
                     tick.mob,
-                    target.get_entity(),
+                    target.as_ref(),
                     &living.held_item(tick.mob),
+                    DamageType::MOB_ATTACK_NO_AGGRO,
                 );
             }
             let speed_force = (living.get_speed() * RAM_SPEED_FORCE_FACTOR).clamp(0.2, 3.0)
