@@ -9,6 +9,7 @@ use pumpkin_data::Block;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockId;
 use pumpkin_data::BlockStateId;
+use pumpkin_data::FacingExt;
 use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::tag::Taggable;
@@ -26,6 +27,7 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::click::{ClickEvent, ClickPayload};
 use pumpkin_util::text::color::NamedColor;
 use pumpkin_world::tick::TickPriority;
+use pumpkin_world::world::BlockAccessor;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -121,54 +123,47 @@ impl SignBlock {
         }
     }
 
-    /// Determines the appropriate facing direction for a wall-hanging sign.
-    fn calculate_wall_hanging_facing(
-        wall_dir: BlockDirection,
-        player_yaw: f32,
-    ) -> pumpkin_data::block_properties::Facing {
-        use pumpkin_data::block_properties::Facing;
-        match wall_dir {
-            BlockDirection::North | BlockDirection::South => {
-                // Wall runs North-South, sign faces East or West
-                if (player_yaw + 360.0) % 360.0 < 180.0 {
-                    Facing::East
-                } else {
-                    Facing::West
-                }
+    /// Vanilla `WallHangingSignBlock.getStateForPlacement`: the first horizontal nearest looking
+    /// direction off the clicked face's axis whose opposite facing can attach to a side neighbour.
+    fn wall_hanging_facing(args: &OnPlaceArgs) -> Option<BlockDirection> {
+        for dir in args.nearest_looking_directions() {
+            let dir = dir.to_block_direction();
+            if !dir.is_horizontal() || dir == args.direction || dir == args.direction.opposite() {
+                continue;
             }
-            BlockDirection::East | BlockDirection::West => {
-                // Wall runs East-West, sign faces North or South
-                if (-270.0..=270.0).contains(&player_yaw) {
-                    Facing::South
-                } else {
-                    Facing::North
-                }
+            let facing = dir.opposite();
+            if Self::wall_hanging_can_place(args.world, args.position, facing) {
+                return Some(facing);
             }
-            _ => wall_dir.opposite().to_facing(),
         }
+        None
     }
 
-    /// Calculates rotation for wall-hanging signs.
-    fn calculate_wall_hanging_rotation(
-        wall_dir: BlockDirection,
-        player_rot: u8,
-        is_sneaking: bool,
-    ) -> u8 {
-        if is_sneaking {
-            return player_rot;
-        }
+    /// Vanilla `WallHangingSignBlock.canPlace`.
+    fn wall_hanging_can_place(
+        world: &dyn BlockAccessor,
+        pos: &BlockPos,
+        facing: BlockDirection,
+    ) -> bool {
+        let cw = facing.rotate_clockwise();
+        let ccw = facing.rotate_counter_clockwise();
+        Self::wall_hanging_can_attach_to(world, facing, &pos.offset(cw.to_offset()), ccw)
+            || Self::wall_hanging_can_attach_to(world, facing, &pos.offset(ccw.to_offset()), cw)
+    }
 
-        match wall_dir {
-            BlockDirection::North | BlockDirection::South => {
-                // Snap to North-South axis (0 or 8)
-                if (4..12).contains(&player_rot) { 8 } else { 0 }
-            }
-            BlockDirection::East | BlockDirection::West => {
-                // Snap to East-West axis (4 or 12)
-                if (2..10).contains(&player_rot) { 4 } else { 12 }
-            }
-            _ => player_rot,
+    /// Vanilla `WallHangingSignBlock.canAttachTo`.
+    fn wall_hanging_can_attach_to(
+        world: &dyn BlockAccessor,
+        facing: BlockDirection,
+        pos: &BlockPos,
+        face: BlockDirection,
+    ) -> bool {
+        let (block, state) = world.get_block_and_state(pos);
+        if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_WALL_HANGING_SIGNS) {
+            return get_wall_support_direction(block, state.id)
+                .is_some_and(|d| d == facing || d == facing.opposite());
         }
+        world.is_face_sturdy(pos, face)
     }
 
     /// Determines the block variant and placement properties for a sign.
@@ -177,10 +172,10 @@ impl SignBlock {
         let is_sneaking = args.player.get_entity().is_sneaking();
 
         // Select block variant
-        let block_id = if is_hanging {
+        let (block_id, wall_hanging_facing) = if is_hanging {
             Self::select_hanging_variant(args, support)?
         } else {
-            Self::select_standing_variant(args, support)
+            (Self::select_standing_variant(args, support), None)
         };
 
         let actual_block = Block::from_id(block_id);
@@ -188,7 +183,7 @@ impl SignBlock {
 
         // Calculate orientation
         let (facing, rotation, attached) = if is_wall_hanging {
-            Self::calculate_wall_hanging_orientation(args, support, is_sneaking)
+            (wall_hanging_facing.map(|d| d.to_facing()), None, false)
         } else if is_hanging {
             Self::calculate_ceiling_orientation(args, is_sneaking)
         } else if actual_block.name.contains("wall") {
@@ -206,19 +201,31 @@ impl SignBlock {
         })
     }
 
-    /// Selects the appropriate hanging sign variant.
-    fn select_hanging_variant(args: &OnPlaceArgs, support: &SupportInfo) -> Option<BlockId> {
-        if args.direction == BlockDirection::Down && support.above_is_valid {
-            Some(args.block.id) // Ceiling hanging
-        } else if (args.direction.is_horizontal() || args.direction == BlockDirection::Up)
-            && support.side_direction.is_some()
-        {
-            Some(get_sign_variant(args.block, true)) // Wall-hanging with post
-        } else if support.above_is_valid {
-            Some(args.block.id)
-        } else {
-            None // No valid placement
+    /// Selects the hanging sign variant like vanilla `HangingSignItem` (a
+    /// `StandingAndWallBlockItem` attached UP): walk the nearest looking directions, skip DOWN,
+    /// take the ceiling sign on UP and the wall-hanging sign on a horizontal direction, whichever
+    /// valid one comes first.
+    fn select_hanging_variant(
+        args: &OnPlaceArgs,
+        support: &SupportInfo,
+    ) -> Option<(BlockId, Option<BlockDirection>)> {
+        let wall_facing = Self::wall_hanging_facing(args);
+        for dir in args.nearest_looking_directions() {
+            match dir.to_block_direction() {
+                BlockDirection::Down => {}
+                BlockDirection::Up => {
+                    if support.above_is_valid {
+                        return Some((args.block.id, None)); // Ceiling hanging
+                    }
+                }
+                _ => {
+                    if wall_facing.is_some() {
+                        return Some((get_sign_variant(args.block, true), wall_facing));
+                    }
+                }
+            }
         }
+        None
     }
 
     /// Selects the appropriate standing sign variant.
@@ -228,34 +235,6 @@ impl SignBlock {
         } else {
             args.block.id // Standing sign
         }
-    }
-
-    /// Calculates orientation for wall-hanging signs.
-    fn calculate_wall_hanging_orientation(
-        args: &OnPlaceArgs,
-        support: &SupportInfo,
-        is_sneaking: bool,
-    ) -> (
-        Option<pumpkin_data::block_properties::Facing>,
-        Option<u8>,
-        bool,
-    ) {
-        let wall_dir = if args.direction.is_horizontal() {
-            args.direction
-        } else {
-            support.side_direction.unwrap_or(args.direction)
-        };
-
-        let player_yaw = args.player.get_entity().yaw.load();
-        let facing = Self::calculate_wall_hanging_facing(wall_dir, player_yaw);
-
-        let player_rot = args.player.get_entity().get_flipped_rotation_16();
-        let rotation = Self::calculate_wall_hanging_rotation(wall_dir, player_rot, is_sneaking);
-
-        let is_angled = rotation % 4 != 0;
-        let attached = is_angled || is_sneaking;
-
-        (Some(facing), Some(rotation), attached)
     }
 
     /// Calculates orientation for ceiling-hanging signs.
@@ -404,6 +383,28 @@ impl BlockBehaviour for SignBlock {
                         || is_permissive
                 }
             };
+        }
+
+        // Hanging signs placed by a player: vanilla `HangingSignItem` tries the ceiling sign and
+        // every wall-hanging facing in the player's look order, so allow placement when any of
+        // them can attach; `on_place` picks the one vanilla would.
+        if is_hanging && !is_wall_sign {
+            let above = args.position.up();
+            return args
+                .block_accessor
+                .is_face_sturdy_center(&above, BlockDirection::Down)
+                || {
+                    let above_block = args.block_accessor.get_block(&above);
+                    above_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_ALL_SIGNS)
+                        || above_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES)
+                }
+                || BlockDirection::horizontal().into_iter().any(|d| {
+                    Self::wall_hanging_can_place(
+                        args.block_accessor,
+                        args.position,
+                        d.to_block_direction(),
+                    )
+                });
         }
 
         let clicked_face = args

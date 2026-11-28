@@ -2,19 +2,16 @@ use pumpkin_data::block_properties::{HorizontalFacing, ShelfMushroomLikeProperti
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{
-    Block, BlockDirection, BlockState, BlockStateId, FacingExt, HorizontalFacingExt, Mirror,
-    Rotation,
+    Block, BlockState, BlockStateId, FacingExt, HorizontalFacingExt, Mirror, Rotation,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
 use crate::block::{
-    BlockBehaviour, BlockIsReplacing, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, PathComputationType, UpdateEntityMovementAfterFallOnArgs,
-    bounce_entity_after_fall,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    PathComputationType, UpdateEntityMovementAfterFallOnArgs, bounce_entity_after_fall,
 };
-use crate::entity::EntityBase;
 
 const MAX_AGE: u8 = 1;
 
@@ -53,18 +50,9 @@ impl BlockBehaviour for ShelfMushroomBlock {
         let mut props = ShelfMushroomProperties::default(args.block);
         props.age = 0;
 
-        if args.replacing == BlockIsReplacing::None
-            && args.direction != BlockDirection::Up
-            && args.direction != BlockDirection::Down
-            && let Some(facing) = args.direction.opposite().to_horizontal_facing()
-            && Self::can_survive(args.world, args.position, facing)
-        {
-            props.facing = facing;
-            return props.to_state_id(args.block);
-        }
-
-        let directions = args.player.get_entity().get_entity_facing_order();
-        for dir in directions {
+        // Vanilla `ShelfMushroomBlock.getStateForPlacement`: FACING = the opposite of the first
+        // horizontal nearest looking direction that survives.
+        for dir in args.nearest_looking_directions() {
             if let Some(facing) = dir.opposite().to_horizontal_facing()
                 && Self::can_survive(args.world, args.position, facing)
             {

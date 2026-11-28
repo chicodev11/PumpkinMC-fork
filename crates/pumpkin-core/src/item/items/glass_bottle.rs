@@ -162,7 +162,9 @@ impl ItemBehaviour for GlassBottleItem {
             let hit_pos = hit.block_pos;
             let (block, state_id) = world.get_block_and_state_id(&hit_pos);
             if block.id == Block::WATER.id || block.is_waterlogged(state_id) {
-                world.play_sound(
+                // Vanilla BottleItem.use: level.playSound(player, ..).
+                world.play_sound_expect(
+                    player,
                     Sound::ItemBottleFill,
                     SoundCategory::Neutral,
                     &hit_pos.to_f64(),
@@ -190,7 +192,8 @@ impl ItemBehaviour for GlassBottleItem {
             return BlockActionResult::Pass;
         }
 
-        world.play_sound(
+        world.play_sound_expect(
+            player,
             Sound::ItemBottleFill,
             SoundCategory::Neutral,
             &location.to_f64(),

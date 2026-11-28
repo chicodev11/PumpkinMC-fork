@@ -1,6 +1,5 @@
 use crate::block::{
-    BlockBehaviour, BlockIsReplacing, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-    PlacedArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{Facing, WallTorchLikeProperties, WhiteBannerLikeProperties};
@@ -34,40 +33,35 @@ impl BlockBehaviour for BannerBlock {
     }
 
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
-        if args.direction == BlockDirection::Down && can_place_standing(args.world, args.position) {
-            let mut props = WhiteBannerLikeProperties::default(args.block);
-            props.rotation = args.player.get_entity().get_flipped_rotation_16();
-            return props.to_state_id(args.block);
-        }
-
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-        if args.replacing == BlockIsReplacing::None {
-            let face = args.direction.to_facing();
-            let mut i = 0;
-            while i < directions.len() && directions[i] != face {
-                i += 1;
-            }
-            if i > 0 {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        }
+        // Vanilla `StandingAndWallBlockItem.getPlacementState` (attached DOWN): the wall state is
+        // the first horizontal nearest looking direction that survives; walking the same order,
+        // DOWN picks the standing banner and any horizontal direction picks that wall state.
+        let directions = args.nearest_looking_directions();
+        let wall_facing = directions.iter().copied().find(|dir| {
+            dir.to_horizontal_facing().is_some()
+                && can_place_wall(args.world, args.position, dir.to_block_direction())
+        });
 
         for dir in directions {
-            if dir == Facing::Down {
-                if can_place_standing(args.world, args.position) {
-                    let mut props = WhiteBannerLikeProperties::default(args.block);
-                    props.rotation = args.player.get_entity().get_flipped_rotation_16();
-                    return props.to_state_id(args.block);
+            match dir {
+                Facing::Up => {}
+                Facing::Down => {
+                    if can_place_standing(args.world, args.position) {
+                        let mut props = WhiteBannerLikeProperties::default(args.block);
+                        props.rotation = args.player.get_entity().get_flipped_rotation_16();
+                        return props.to_state_id(args.block);
+                    }
                 }
-            } else if dir != Facing::Up
-                && can_place_wall(args.world, args.position, dir.to_block_direction())
-                && let Some(wall_block) = get_wall_banner_block(args.block)
-                && let Some(facing) = dir.opposite().to_horizontal_facing()
-            {
-                let mut props = WallTorchLikeProperties::default(wall_block);
-                props.facing = facing;
-                return props.to_state_id(wall_block);
+                _ => {
+                    if let Some(facing) =
+                        wall_facing.and_then(|d| d.opposite().to_horizontal_facing())
+                        && let Some(wall_block) = get_wall_banner_block(args.block)
+                    {
+                        let mut props = WallTorchLikeProperties::default(wall_block);
+                        props.facing = facing;
+                        return props.to_state_id(wall_block);
+                    }
+                }
             }
         }
 

@@ -1,14 +1,14 @@
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::skull::SkullBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockIsReplacing, BlockMetadata, OnNeighborUpdateArgs, OnPlaceArgs,
-    PathComputationType, PlacedArgs,
+    BlockBehaviour, BlockMetadata, OnNeighborUpdateArgs, OnPlaceArgs, PathComputationType,
+    PlacedArgs,
 };
 use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{
     Facing, SkeletonSkullLikeProperties, SkeletonWallSkullLikeProperties,
 };
-use pumpkin_data::{Block, BlockDirection, BlockId, BlockState, BlockStateId, FacingExt};
+use pumpkin_data::{Block, BlockId, BlockState, BlockStateId, FacingExt};
 use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
@@ -69,53 +69,33 @@ impl BlockBehaviour for SkullBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         let powered = block_receives_redstone_power(args.world, args.position);
 
-        if args.direction == BlockDirection::Down
-            && !args
-                .world
-                .get_block_state(&args.position.down())
-                .replaceable()
-        {
-            let mut props = SkeletonSkullLikeProperties::default(args.block);
-            props.rotation = args.player.get_entity().get_rotation_16();
-            props.powered = powered;
-            return props.to_state_id(args.block);
-        }
-
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-        if args.replacing == BlockIsReplacing::None {
-            let face = args.direction.to_facing();
-            let mut i = 0;
-            while i < directions.len() && directions[i] != face {
-                i += 1;
-            }
-            if i > 0 {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        }
+        // Vanilla `StandingAndWallBlockItem.getPlacementState` (attached DOWN): the wall state is
+        // the first horizontal nearest looking direction whose neighbour is not replaceable
+        // (`WallSkullBlock.getStateForPlacement`); walking the same order, DOWN picks the standing
+        // skull (which always survives) and any horizontal direction picks that wall state.
+        let directions = args.nearest_looking_directions();
+        let wall_facing = directions.iter().copied().find(|dir| {
+            dir.to_horizontal_facing().is_some()
+                && !args
+                    .world
+                    .get_block_state(&args.position.offset(dir.to_block_direction().to_offset()))
+                    .replaceable()
+        });
 
         for dir in directions {
-            if dir == Facing::Down {
-                if !args
-                    .world
-                    .get_block_state(&args.position.down())
-                    .replaceable()
-                {
-                    let mut props = SkeletonSkullLikeProperties::default(args.block);
-                    props.rotation = args.player.get_entity().get_rotation_16();
-                    props.powered = powered;
-                    return props.to_state_id(args.block);
-                }
-            } else if dir != Facing::Up {
-                let support_pos = args.position.offset(dir.to_block_direction().to_offset());
-                if !args.world.get_block_state(&support_pos).replaceable()
-                    && let Some(facing) = dir.opposite().to_horizontal_facing()
-                {
-                    let wall_block = get_wall_skull_block(args.block);
-                    let mut props = SkeletonWallSkullLikeProperties::default(wall_block);
-                    props.facing = facing;
-                    props.powered = powered;
-                    return props.to_state_id(wall_block);
+            match dir {
+                Facing::Up => {}
+                Facing::Down => break,
+                _ => {
+                    if let Some(facing) =
+                        wall_facing.and_then(|d| d.opposite().to_horizontal_facing())
+                    {
+                        let wall_block = get_wall_skull_block(args.block);
+                        let mut props = SkeletonWallSkullLikeProperties::default(wall_block);
+                        props.facing = facing;
+                        props.powered = powered;
+                        return props.to_state_id(wall_block);
+                    }
                 }
             }
         }

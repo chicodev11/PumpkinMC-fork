@@ -917,12 +917,23 @@ impl BlockRegistry {
 
         let _replaced_id =
             world.set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL);
-        crate::block::custom::play_custom_block_sound(
+        // Vanilla BlockItem.place: playSound(player, ...) so the placer (who predicted it) does not hear it twice.
+        if !crate::block::custom::play_custom_block_sound(
             &world,
             new_state,
             &final_block_pos,
             crate::block::custom::SoundKind::Place,
-        );
+        ) {
+            let sound_type = BlockState::from_id(new_state).get_sound_type();
+            world.play_sound_raw_expect(
+                player,
+                sound_type.place_sound as u16,
+                pumpkin_data::sound::SoundCategory::Blocks,
+                &final_block_pos.to_centered_f64(),
+                f32::midpoint(sound_type.volume, 1.0),
+                sound_type.pitch * 0.8,
+            );
+        }
 
         world.play_bedrock_level_sound(
             "place",

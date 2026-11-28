@@ -496,6 +496,20 @@ impl EntityBase for ExperienceOrbEntity {
             return;
         }
         self.follow_nearby_player();
+        // Vanilla: an orb stuck in blocks with nobody to follow works its way out
+        // (`moveTowardsClosestSpace`).
+        if no_physics && self.following_player.get().is_none() {
+            let bounding_box = entity.bounding_box.load();
+            if !world.is_space_empty(bounding_box.shift(entity.velocity.load())) {
+                let pos = entity.pos.load();
+                entity.push_out_of_blocks(Vector3::new(
+                    pos.x,
+                    f64::midpoint(bounding_box.min.y, bounding_box.max.y),
+                    pos.z,
+                ));
+                entity.velocity_dirty.store(true, Ordering::SeqCst);
+            }
+        }
         let velo = entity.velocity.load();
 
         entity.move_entity(caller, velo);

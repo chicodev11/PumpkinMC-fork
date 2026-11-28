@@ -371,6 +371,34 @@ pub struct OnPlaceArgs<'a> {
     pub use_item_on: &'a SUseItemOn,
 }
 
+impl OnPlaceArgs<'_> {
+    /// Vanilla `BlockPlaceContext.replacingClickedOnBlock`: the block is placed into the
+    /// clicked block itself (it was replaceable) instead of next to it.
+    #[must_use]
+    pub fn replacing_clicked(&self) -> bool {
+        *self.position == self.use_item_on.position
+    }
+
+    /// Vanilla `BlockPlaceContext.getNearestLookingDirections`: the player's facing order, with
+    /// the clicked face's opposite (`self.direction`) moved to the front unless the clicked block
+    /// is being replaced.
+    #[must_use]
+    pub fn nearest_looking_directions(&self) -> [pumpkin_data::block_properties::Facing; 6] {
+        let mut directions = self.player.get_entity().get_entity_facing_order();
+        if self.replacing_clicked() {
+            return directions;
+        }
+        let face = self.direction.to_facing();
+        if let Some(i) = directions.iter().position(|&d| d == face)
+            && i > 0
+        {
+            directions.copy_within(0..i, 1);
+            directions[0] = face;
+        }
+        directions
+    }
+}
+
 pub struct RandomTickArgs<'a> {
     pub world: &'a Arc<World>,
     pub block: &'a Block,

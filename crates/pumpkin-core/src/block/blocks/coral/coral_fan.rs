@@ -1,10 +1,7 @@
-use crate::{
-    block::{
-        BlockBehaviour, BlockIsReplacing, BlockMetadata, CanPlaceAtArgs,
-        GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
-        blocks::coral::{is_dead_coral, scan_for_water, try_schedule_die_tick},
-    },
-    entity::EntityBase,
+use crate::block::{
+    BlockBehaviour, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    OnScheduledTickArgs, PlacedArgs,
+    blocks::coral::{is_dead_coral, scan_for_water, try_schedule_die_tick},
 };
 use pumpkin_data::{
     Block, BlockDirection, BlockId, BlockStateId, FacingExt, HorizontalFacingExt,
@@ -49,56 +46,45 @@ pub type CoralFanLikeProperties = MangroveRootsLikeProperties;
 
 impl BlockBehaviour for CoralFanBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
-        if args.direction == BlockDirection::Down
-            && args
-                .world
-                .is_face_sturdy(&args.position.down(), BlockDirection::Up)
-        {
-            return get_default_coral_fan_state_id(args.block, args.replacing.water_source());
-        }
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-
-        if args.replacing == BlockIsReplacing::None {
-            let face = args.direction.to_facing();
-            let mut i = 0;
-            while i < directions.len() && directions[i] != face {
-                i += 1;
-            }
-
-            if i > 0 {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        } else if directions[0] == Facing::Down
-            && args
-                .world
-                .is_face_sturdy(&args.position.down(), BlockDirection::Up)
-        {
-            return get_default_coral_fan_state_id(args.block, args.replacing.water_source());
-        }
+        // Vanilla `StandingAndWallBlockItem.getPlacementState` (attached DOWN): the wall state is
+        // the first horizontal nearest looking direction that survives; walking the same order,
+        // DOWN picks the standing fan and any horizontal direction picks that wall state.
+        let directions = args.nearest_looking_directions();
+        let wall_facing = directions.iter().copied().find_map(|dir| {
+            dir.to_horizontal_facing()
+                .filter(|&h_facing| can_place_at(args.world, args.position, h_facing))
+        });
 
         for dir in directions {
-            if let (Some(h_facing), Some(opp_facing)) = (
-                dir.to_horizontal_facing(),
-                dir.opposite().to_horizontal_facing(),
-            ) && can_place_at(args.world, args.position, h_facing)
-            {
-                let Some(wall_block) = get_corresponding_wall_fan_type(args.block.id) else {
-                    return BlockStateId::AIR;
-                };
-                let mut coral_wall_fan_props = CoralWallFanLikeProperties::default(wall_block);
-                coral_wall_fan_props.waterlogged = args.replacing.water_source();
-                coral_wall_fan_props.facing = opp_facing;
-                return coral_wall_fan_props.to_state_id(wall_block);
+            match dir {
+                Facing::Up => {}
+                Facing::Down => {
+                    if args
+                        .world
+                        .is_face_sturdy(&args.position.down(), BlockDirection::Up)
+                    {
+                        return get_default_coral_fan_state_id(
+                            args.block,
+                            args.replacing.water_source(),
+                        );
+                    }
+                }
+                _ => {
+                    if let Some(h_facing) = wall_facing {
+                        let Some(wall_block) = get_corresponding_wall_fan_type(args.block.id)
+                        else {
+                            return BlockStateId::AIR;
+                        };
+                        let mut coral_wall_fan_props =
+                            CoralWallFanLikeProperties::default(wall_block);
+                        coral_wall_fan_props.waterlogged = args.replacing.water_source();
+                        coral_wall_fan_props.facing = h_facing.opposite();
+                        return coral_wall_fan_props.to_state_id(wall_block);
+                    }
+                }
             }
         }
 
-        if args
-            .world
-            .is_face_sturdy(&args.position.down(), BlockDirection::Up)
-        {
-            return get_default_coral_fan_state_id(args.block, args.replacing.water_source());
-        }
         BlockStateId::AIR
     }
 

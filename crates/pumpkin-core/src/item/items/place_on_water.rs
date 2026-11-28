@@ -9,7 +9,7 @@ use pumpkin_data::fluid::Fluid;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::sound::SoundCategory;
 use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockDirection};
@@ -84,10 +84,10 @@ impl ItemBehaviour for PlaceOnWaterBlockItem {
             return;
         }
 
-        let (placed_block, sound) = if item.id == Item::LILY_PAD.id {
-            (&Block::LILY_PAD, Sound::BlockLilyPadPlace)
+        let placed_block = if item.id == Item::LILY_PAD.id {
+            &Block::LILY_PAD
         } else {
-            (&Block::FROGSPAWN, Sound::BlockFrogspawnPlace)
+            &Block::FROGSPAWN
         };
 
         world.set_block_state(
@@ -95,7 +95,16 @@ impl ItemBehaviour for PlaceOnWaterBlockItem {
             placed_block.default_state.id,
             BlockFlags::NOTIFY_ALL,
         );
-        world.play_sound(sound, SoundCategory::Blocks, &above_pos.to_f64());
+        // Vanilla BlockItem.place: playSound(player, ..) with the block SoundType place sound.
+        let sound_type = placed_block.default_state.get_sound_type();
+        world.play_sound_raw_expect(
+            player,
+            sound_type.place_sound as u16,
+            SoundCategory::Blocks,
+            &above_pos.to_centered_f64(),
+            f32::midpoint(sound_type.volume, 1.0),
+            sound_type.pitch * 0.8,
+        );
         world.emit_game_event(GameEvent::BlockPlace.name(), above_pos.to_f64());
 
         let mut stack = player.inventory.get_stack_in_hand(hand);

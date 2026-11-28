@@ -58,42 +58,53 @@ impl FurnaceMinecart {
         }
     }
 
-    pub(super) fn velocity(&self, entity: &Entity, velocity: Vector3<f64>) -> Vector3<f64> {
+    /// Vanilla `MinecartFurnace.applyNaturalSlowdown`, then `AbstractMinecart`'s.
+    pub(super) fn velocity(
+        &self,
+        entity: &Entity,
+        velocity: Vector3<f64>,
+        has_passengers: bool,
+    ) -> Vector3<f64> {
+        let in_water = entity.touching_water.load(Ordering::Relaxed);
         let mut push = self.push.load();
-        let push_length_squared = push.x.mul_add(push.x, push.z * push.z);
-        let velocity_length_squared = velocity.x.mul_add(velocity.x, velocity.z * velocity.z);
-
-        let mut next = if push_length_squared > 1.0e-7 {
-            if push_length_squared > 1.0e-4 && velocity_length_squared > 0.001 {
-                let velocity_direction = Vector3::new(velocity.x, 0.0, velocity.z).normalize();
-                let push_length = push.length();
-                let push_scale = if velocity_direction.dot(&push) < 0.0 {
-                    -push_length
+        let next = if push.length_squared() > 1.0e-7 {
+            // `calculateNewPushAlong`: keep the push's strength along the cart's motion.
+            if push.horizontal_length_squared() > 1.0e-4
+                && velocity.horizontal_length_squared() > 0.001
+            {
+                let onto = velocity.length_squared();
+                let projected = if onto == 0.0 {
+                    velocity
                 } else {
-                    push_length
+                    let scale = push.dot(&velocity) / onto;
+                    velocity.multiply(scale, scale, scale)
                 };
-                push = velocity_direction.multiply(push_scale, 0.0, push_scale);
+                let length = push.length();
+                // `Vec3.normalize` gives zero for a near-zero vector.
+                let direction = if projected.length() < 1.0e-5 {
+                    Vector3::new(0.0, 0.0, 0.0)
+                } else {
+                    projected.normalize()
+                };
+                push = direction.multiply(length, length, length);
                 self.push.store(push);
             }
-            velocity.multiply(0.8, 0.0, 0.8).add(&push)
+            let next = velocity.multiply(0.8, 0.0, 0.8).add(&push);
+            if in_water {
+                next.multiply(0.1, 0.1, 0.1)
+            } else {
+                next
+            }
         } else {
             velocity.multiply(0.98, 0.0, 0.98)
         };
-
-        let in_water = entity.touching_water.load(Ordering::Relaxed);
+        let factor = if has_passengers { 0.997 } else { 0.96 };
+        let slowed = next.multiply(factor, 0.0, factor);
         if in_water {
-            next = next.multiply(0.1, 0.0, 0.1);
+            slowed.multiply(0.95, 0.95, 0.95)
+        } else {
+            slowed
         }
-        let slowdown = 0.96 * if in_water { 0.95 } else { 1.0 };
-        next = next.multiply(slowdown, 0.0, slowdown);
-
-        let max_speed = if in_water { 0.3 } else { 0.2 };
-        let speed = next.x.hypot(next.z);
-        if speed > max_speed {
-            next.x = next.x / speed * max_speed;
-            next.z = next.z / speed * max_speed;
-        }
-        next
     }
 
     pub(super) fn interact(

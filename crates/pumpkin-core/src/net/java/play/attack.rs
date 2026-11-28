@@ -3,7 +3,8 @@ use super::*;
 
 impl JavaClient {
     pub fn handle_attack(&self, player: &Arc<Player>, attack: &SAttack, server: &Arc<Server>) {
-        if !player.has_client_loaded() {
+        // Vanilla handleAttack: spectators can't attack.
+        if !player.has_client_loaded() || player.is_spectator() {
             return;
         }
         player.update_last_action_time();
@@ -30,15 +31,23 @@ impl JavaClient {
             .as_ref()
             .map(|p| Arc::clone(p) as Arc<dyn EntityBase>)
             .or_else(|| world.get_entity_by_id(entity_id.0));
+        // Vanilla: an unknown entity (died or despawned this tick) is ignored, not kicked for.
         let Some(target) = target else {
+            return;
+        };
+        let target_type = target.get_entity().entity_type;
+        if target_type == &pumpkin_data::entity::EntityType::ITEM
+            || target_type == &pumpkin_data::entity::EntityType::EXPERIENCE_ORB
+        {
             self.try_kick(&TextComponent::translate_cross(
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 [],
             ));
             return;
-        };
-        if !player.can_interact_with_entity(target.as_ref(), 1.0) {
+        }
+        // Vanilla isWithinAttackRange(..., 3.0)
+        if !player.can_interact_with_entity(target.as_ref(), 3.0) {
             return;
         }
         if let Some(player_victim) = &player_target {

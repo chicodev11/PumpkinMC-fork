@@ -4,11 +4,10 @@ use crate::block::{
     BlockBehaviour, BlockIsReplacing, BlockMetadata, BonemealArgs, CanPlaceAtArgs, CanUpdateAtArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs,
 };
-use crate::entity::{EntityBase, player::Player};
+use crate::entity::player::Player;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{
-    Block, BlockDirection, BlockId, BlockStateId, FacingExt,
-    block_properties::GlowLichenLikeProperties,
+    Block, BlockDirection, BlockId, BlockStateId, block_properties::GlowLichenLikeProperties,
 };
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
@@ -30,13 +29,13 @@ impl BlockMetadata for MultifaceBlock {
 impl BlockBehaviour for MultifaceBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         if let BlockIsReplacing::Itself(state_id) = args.replacing {
-            let (Some(direction), _) = get_attach_direction(
+            let Some(direction) = get_attach_direction(
                 args.world,
                 args.position,
                 args.block,
                 Some(args.player),
                 args.direction,
-                true,
+                args.replacing_clicked(),
             ) else {
                 return Block::AIR.default_state.id;
             };
@@ -44,13 +43,13 @@ impl BlockBehaviour for MultifaceBlock {
             set_face(&mut props, direction);
             return props.to_state_id(args.block);
         }
-        let (Some(direction), _) = get_attach_direction(
+        let Some(direction) = get_attach_direction(
             args.world,
             args.position,
             args.block,
             Some(args.player),
             args.direction,
-            false,
+            args.replacing_clicked(),
         ) else {
             return Block::AIR.default_state.id;
         };
@@ -67,9 +66,9 @@ impl BlockBehaviour for MultifaceBlock {
             args.block,
             args.player,
             args.direction.unwrap_or(BlockDirection::Down),
-            false,
+            args.use_item_on
+                .is_some_and(|u| u.position == *args.position),
         )
-        .0
         .is_some()
     }
 
@@ -80,9 +79,8 @@ impl BlockBehaviour for MultifaceBlock {
             args.block,
             Some(args.player),
             args.direction,
-            true,
+            args.use_item_on.position == *args.position,
         )
-        .0
         .is_some()
     }
 
@@ -147,53 +145,46 @@ impl BlockBehaviour for MultifaceBlock {
     }
 }
 
+/// Vanilla `MultifaceBlock.getStateForPlacement(BlockPlaceContext)`: the first direction in
+/// `getNearestLookingDirections` whose face is not already set on a multiface block at
+/// `block_pos` and whose neighbour can be attached to. `toward_clicked` is the clicked face's
+/// opposite.
 fn get_attach_direction(
     block_accessor: &dyn BlockAccessor,
     block_pos: &BlockPos,
     target_block: &Block,
     player_wrapper: Option<&Player>,
-    click_direction: BlockDirection,
-    replacing: bool,
-) -> (Option<BlockDirection>, bool) {
-    let clicked_pos = block_pos.offset(click_direction.to_offset());
-    let clicked_block = block_accessor.get_block(&clicked_pos);
-
-    if !replacing && clicked_block == target_block {
-        return (None, false);
-    }
-
-    if can_attach_to(block_accessor, &clicked_pos, click_direction) {
-        return (Some(click_direction), false);
-    }
-
-    let (replacing_block, replacing_block_state) = block_accessor.get_block_and_state(block_pos);
-    let already_active = if replacing_block == target_block {
-        active_directions(GlowLichenLikeProperties::from_state_id(
-            replacing_block_state.id,
-        ))
+    toward_clicked: BlockDirection,
+    replace_clicked: bool,
+) -> Option<BlockDirection> {
+    let (current_block, current_state) = block_accessor.get_block_and_state(block_pos);
+    let already_active = if current_block == target_block {
+        active_directions(GlowLichenLikeProperties::from_state_id(current_state.id))
     } else {
         FxHashSet::default()
     };
 
-    if let Some(player) = player_wrapper {
-        let fs = player.get_entity().get_entity_facing_order();
-        let directions = [
-            fs[0].to_block_direction(),
-            fs[1].to_block_direction(),
-            fs[2].to_block_direction(),
-            fs[3].to_block_direction(),
-            fs[4].to_block_direction(),
-            fs[5].to_block_direction(),
-        ];
-        for dir in directions {
-            if !already_active.contains(&dir)
-                && can_attach_to(block_accessor, &block_pos.offset(dir.to_offset()), dir)
-            {
-                return (Some(dir), false);
+    let directions = player_wrapper.map_or_else(
+        || {
+            let mut dirs = BlockDirection::all();
+            if let Some(i) = dirs.iter().position(|&d| d == toward_clicked) {
+                dirs.swap(0, i);
             }
-        }
-    }
-    (None, false)
+            dirs
+        },
+        |player| {
+            crate::block::blocks::vine::get_nearest_looking_directions(
+                player,
+                replace_clicked,
+                toward_clicked,
+            )
+        },
+    );
+
+    directions.into_iter().find(|&dir| {
+        !already_active.contains(&dir)
+            && can_attach_to(block_accessor, &block_pos.offset(dir.to_offset()), dir)
+    })
 }
 
 /// Vanilla `MultifaceBlock.canAttachTo`: the support's face towards the vein is sturdy.

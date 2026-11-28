@@ -9,10 +9,9 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockIsReplacing, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, PathComputationType, RandomTickArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    PathComputationType, RandomTickArgs,
 };
-use crate::entity::EntityBase;
 
 pub const MAX_AGE: u8 = 2;
 
@@ -57,16 +56,9 @@ impl BlockBehaviour for CocoaBlock {
         let mut props = CocoaProperties::default(args.block);
         props.age = 0;
 
-        if args.replacing == BlockIsReplacing::None
-            && let Some(facing) = args.direction.to_horizontal_facing()
-            && Self::can_survive(args.world, args.position, facing)
-        {
-            props.facing = facing;
-            return props.to_state_id(args.block);
-        }
-
-        let directions = args.player.get_entity().get_entity_facing_order();
-        for dir in directions {
+        // Vanilla `CocoaBlock.getStateForPlacement`: FACING = the first horizontal nearest looking
+        // direction that survives.
+        for dir in args.nearest_looking_directions() {
             if let Some(facing) = dir.to_horizontal_facing()
                 && Self::can_survive(args.world, args.position, facing)
             {

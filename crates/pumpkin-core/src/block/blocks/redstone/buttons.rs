@@ -49,7 +49,7 @@ pub struct ButtonBlock;
 
 impl BlockBehaviour for ButtonBlock {
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
-        if Self::press(args.world, args.position) {
+        if Self::press(args.world, args.position, Some(args.player.as_ref())) {
             BlockActionResult::Success
         } else {
             BlockActionResult::Consume
@@ -60,7 +60,7 @@ impl BlockBehaviour for ButtonBlock {
         if !is_stone_button(args.block) {
             let entity_type = args.entity.get_entity().entity_type;
             if is_abstract_arrow(entity_type) {
-                Self::press(args.world, args.position);
+                Self::press(args.world, args.position, None);
             }
         }
     }
@@ -168,7 +168,11 @@ impl ButtonBlock {
     /// Presses the button, unless it is already pressed. Returns whether it was
     /// pressed, so callers can tell the two cases apart the way vanilla's
     /// `ButtonBlock::useWithoutItem` does.
-    pub(crate) fn press(world: &Arc<World>, block_pos: &BlockPos) -> bool {
+    pub(crate) fn press(
+        world: &Arc<World>,
+        block_pos: &BlockPos,
+        player: Option<&crate::entity::player::Player>,
+    ) -> bool {
         let (block, state) = world.get_block_and_state_id(block_pos);
 
         let mut button_props = ButtonLikeProperties::from_state_id(state);
@@ -185,7 +189,17 @@ impl ButtonBlock {
         let delay = if is_stone_button(block) { 20 } else { 30 };
         world.schedule_block_tick(block, *block_pos, delay, TickPriority::Normal);
         Self::update_neighbors(world, block_pos, button_props);
-        world.play_block_sound(get_sound(block, true), SoundCategory::Blocks, *block_pos);
+        // Vanilla playSound(on ? player : null, ...): the presser predicted the click locally.
+        if let Some(player) = player {
+            world.play_block_sound_expect(
+                player,
+                get_sound(block, true),
+                SoundCategory::Blocks,
+                *block_pos,
+            );
+        } else {
+            world.play_block_sound(get_sound(block, true), SoundCategory::Blocks, *block_pos);
+        }
         world.emit_game_event(GameEvent::BlockActivate.name(), block_pos.to_centered_f64());
 
         true

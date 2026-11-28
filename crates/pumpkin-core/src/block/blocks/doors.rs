@@ -134,16 +134,19 @@ fn get_hinge(
 
     if (!has_left_door || has_right_door) && score <= 0 {
         if (!has_right_door || has_left_door) && score >= 0 {
+            // Vanilla: clickLocation - placement pos. The click location is the clicked block
+            // plus the cursor, and the door may sit next to the clicked block.
             let offset = facing.to_offset();
-            let hit = use_item.cursor_pos;
-            if (offset.x >= 0 || hit.z > 0.5)
-                && (offset.x <= 0 || hit.z < 0.5)
-                && (offset.z >= 0 || hit.x < 0.5)
-                && (offset.z <= 0 || hit.x > 0.5)
+            let dx = f64::from(use_item.position.0.x - pos.0.x) + f64::from(use_item.cursor_pos.x);
+            let dz = f64::from(use_item.position.0.z - pos.0.z) + f64::from(use_item.cursor_pos.z);
+            if (offset.x < 0 && dz < 0.5)
+                || (offset.x > 0 && dz > 0.5)
+                || (offset.z < 0 && dx > 0.5)
+                || (offset.z > 0 && dx < 0.5)
             {
-                DoorHinge::Left
-            } else {
                 DoorHinge::Right
+            } else {
+                DoorHinge::Left
             }
         } else {
             DoorHinge::Left

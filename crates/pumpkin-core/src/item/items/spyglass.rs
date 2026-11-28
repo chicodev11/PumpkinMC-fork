@@ -28,8 +28,10 @@ impl ItemBehaviour for SpyglassItem {
         _pitch: f32,
         hand: Hand,
     ) {
-        player.world().play_sound_fine(
-            Sound::ItemSpyglassUse,
+        // Vanilla SpyglassItem.use: player.playSound(..) leaves out the player.
+        player.world().play_sound_raw_expect(
+            player,
+            Sound::ItemSpyglassUse as u16,
             SoundCategory::Players,
             &player.position(),
             1.0,
@@ -52,8 +54,9 @@ impl ItemBehaviour for SpyglassItem {
     }
 
     fn on_stopped_using(&self, _stack: &pumpkin_data::item_stack::ItemStack, player: &Player) {
-        player.world().play_sound_fine(
-            Sound::ItemSpyglassStopUsing,
+        player.world().play_sound_raw_expect(
+            player,
+            Sound::ItemSpyglassStopUsing as u16,
             SoundCategory::Players,
             &player.position(),
             1.0,

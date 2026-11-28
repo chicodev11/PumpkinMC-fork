@@ -78,7 +78,9 @@ fn handle_growing_plant(
     let world = player.world();
     world.set_block_state(location, new_state_id, BlockFlags::NOTIFY_ALL);
     world.emit_game_event(GameEvent::BlockChange.name(), location.to_f64());
-    world.play_sound(
+    // Vanilla ShearsItem.useOn: level.playSound(player, ..).
+    world.play_sound_expect(
+        player,
         Sound::BlockGrowingPlantCrop,
         SoundCategory::Blocks,
         &location.to_f64(),

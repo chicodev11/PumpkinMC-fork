@@ -150,7 +150,8 @@ impl BeehiveBlock {
 
         args.item_stack
             .decrement_unless_creative(args.player.gamemode.load(), 1);
-        args.world.play_sound(
+        args.world.play_sound_expect(
+            args.player,
             Sound::ItemBottleFill,
             SoundCategory::Blocks,
             &args.player.position(),

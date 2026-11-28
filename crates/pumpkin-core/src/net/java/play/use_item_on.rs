@@ -4,8 +4,26 @@ use crate::item::registry::should_try_block_placement;
 use pumpkin_data::block_properties::BlockProperties;
 
 impl JavaClient {
-    #[allow(clippy::too_many_lines)]
     pub fn handle_use_item_on(
+        &self,
+        player: &Arc<Player>,
+        use_item_on: &SUseItemOn,
+        server: &Arc<Server>,
+    ) -> Result<(), BlockPlacingError> {
+        let result = self.handle_use_item_on_inner(player, use_item_on, server);
+        // Vanilla handleUseItemOn: after every use within reach, send the clicked block and
+        // its neighbour on the clicked face, so a wrong client prediction is undone at once.
+        if player.has_client_loaded()
+            && !matches!(result, Err(BlockPlacingError::BlockOutOfReach))
+            && let Ok(face) = BlockDirection::try_from(use_item_on.face.0)
+        {
+            Self::resend_used_blocks(player, &player.world(), use_item_on.position, face);
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn handle_use_item_on_inner(
         &self,
         player: &Arc<Player>,
         use_item_on: &SUseItemOn,
@@ -53,7 +71,6 @@ impl JavaClient {
                 server;
                 event;
                 'cancelled: {
-                    Self::resend_used_blocks(player, &world, position, face);
                     return Ok(());
                 }
             }}
@@ -92,7 +109,6 @@ impl JavaClient {
             server;
             event;
             'cancelled: {
-                Self::resend_used_blocks(player, &world, position, face);
                 return Ok(());
             }
         }}

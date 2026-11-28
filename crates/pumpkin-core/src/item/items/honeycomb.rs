@@ -43,7 +43,7 @@ impl ItemBehaviour for HoneyCombItem {
         _server: &Server,
     ) -> BlockActionResult {
         let world = player.world();
-        if try_wax_block(&world, location, block) {
+        if try_wax_block_by(&world, location, block, Some(player)) {
             item.decrement_unless_creative(player.gamemode.load(), 1);
             BlockActionResult::Success
         } else {
@@ -59,6 +59,30 @@ impl ItemBehaviour for HoneyCombItem {
 /// Waxes the block at `location` if it has a waxed equivalent, emitting the wax
 /// particles and sound on success.
 pub(crate) fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Block) -> bool {
+    try_wax_block_by(world, location, block, None)
+}
+
+/// `try_wax_block` for a waxing player, who is left out of the wax sound (vanilla
+/// `HoneycombItem.useOn` uses `level.playSound(player, ..)`; the player predicted it).
+fn try_wax_block_by(
+    world: &Arc<World>,
+    location: BlockPos,
+    block: &Block,
+    player: Option<&Player>,
+) -> bool {
+    let play_wax_sound = || match player {
+        Some(p) => world.play_sound_expect(
+            p,
+            Sound::ItemHoneycombWaxOn,
+            SoundCategory::Blocks,
+            &location.to_f64(),
+        ),
+        None => world.play_sound(
+            Sound::ItemHoneycombWaxOn,
+            SoundCategory::Blocks,
+            &location.to_f64(),
+        ),
+    };
     let Some(replacement) = get_waxed(block.id) else {
         return false;
     };
@@ -108,11 +132,7 @@ pub(crate) fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Bloc
                 );
                 world.emit_game_event(GameEvent::BlockChange.name(), neighbor_pos.to_f64());
                 world.sync_world_event(WorldEvent::ParticlesWaxOn, neighbor_pos, 0);
-                world.play_sound(
-                    Sound::ItemHoneycombWaxOn,
-                    SoundCategory::Blocks,
-                    &location.to_f64(),
-                );
+                play_wax_sound();
             }
         }
     }
@@ -120,11 +140,7 @@ pub(crate) fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Bloc
     world.set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL);
     world.emit_game_event(GameEvent::BlockChange.name(), location.to_f64());
     world.sync_world_event(WorldEvent::ParticlesWaxOn, location, 0);
-    world.play_sound(
-        Sound::ItemHoneycombWaxOn,
-        SoundCategory::Blocks,
-        &location.to_f64(),
-    );
+    play_wax_sound();
     true
 }
 

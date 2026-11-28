@@ -1,9 +1,8 @@
 use crate::block::blocks::weathering_copper::change_over_time;
 use crate::block::{
-    BlockBehaviour, BlockIsReplacing, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
     PathComputationType, RandomTickArgs, can_support_center,
 };
-use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{Facing, LanternLikeProperties};
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId};
@@ -20,18 +19,7 @@ impl BlockBehaviour for LanternBlock {
         let mut props = LanternLikeProperties::default(args.block);
         props.r#waterlogged = args.replacing.water_source();
 
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-        if args.replacing == BlockIsReplacing::None {
-            let face = args.direction.to_facing();
-            if let Some(i) = directions.iter().position(|&d| d == face)
-                && i > 0
-            {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        }
-
-        for dir in directions {
+        for dir in args.nearest_looking_directions() {
             if dir == Facing::Up || dir == Facing::Down {
                 let hanging = dir == Facing::Up;
                 if can_survive(args.world, args.position, hanging) {

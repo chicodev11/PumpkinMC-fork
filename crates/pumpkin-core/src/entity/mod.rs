@@ -1131,6 +1131,17 @@ pub trait EntityBase: Send + Sync + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.canBeCollidedWith`: solid for other entities' movement (boats, shulkers).
+    fn can_be_collided_with(&self, _other: &dyn EntityBase) -> bool {
+        false
+    }
+
+    /// Vanilla `AbstractBoat.canVehicleCollide` movers (boats, minecarts) are also stopped by
+    /// pushable entities, not only by ones that can be collided with.
+    fn collides_with_pushables(&self) -> bool {
+        false
+    }
+
     /// Vanilla `LivingEntity.onClimbable`.
     fn on_climbable(&self) -> bool {
         self.get_living_entity()
@@ -1142,52 +1153,7 @@ pub trait EntityBase: Send + Sync + std::any::Any {
     }
 
     fn push(&self, entity: &dyn EntityBase) {
-        // Vanilla `LivingEntity.push`: sleeping entities neither push nor get pushed here.
-        if self.get_living_entity().is_some()
-            && self.get_entity().pose.load() == EntityPose::Sleeping
-        {
-            return;
-        }
-
-        let self_entity = self.get_entity();
-        let other_entity = entity.get_entity();
-
-        if self_entity.no_physics.load(Ordering::Relaxed)
-            || other_entity.no_physics.load(Ordering::Relaxed)
-        {
-            return;
-        }
-
-        if self.is_passenger_of_same_vehicle(entity) {
-            return;
-        }
-
-        let mut dx = other_entity.pos.load().x - self_entity.pos.load().x;
-        let mut dz = other_entity.pos.load().z - self_entity.pos.load().z;
-        let mut d = dx.abs().max(dz.abs());
-        if d >= 0.01 {
-            d = d.sqrt();
-            dx /= d;
-            dz /= d;
-            let mut d2 = 1.0 / d;
-            if d2 > 1.0 {
-                d2 = 1.0;
-            }
-            dx *= d2;
-            dz *= d2;
-            dx *= PUSH_STRENGTH;
-            dz *= PUSH_STRENGTH;
-
-            if !self_entity.has_passengers() && self.is_pushable() {
-                self_entity.push_by(Vector3::new(-dx, 0.0, -dz));
-            }
-
-            // A Java client runs only the other side's `pushEntities` on its player, so
-            // the pusher's own half stays off the Bedrock impulse
-            if !other_entity.has_passengers() && entity.is_pushable() {
-                other_entity.push_back_by(Vector3::new(dx, 0.0, dz));
-            }
-        }
+        entity_push(self, entity);
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2674,7 +2640,8 @@ impl Entity {
         if !on_ground_after_collision {
             step_up_box = step_up_box.expand_towards(0.0, f64::from(-1.0E-5f32), 0.0);
         }
-        let (colliders, _) = self.world.load().get_block_collisions(step_up_box, caller);
+        let (mut colliders, _) = self.world.load().get_block_collisions(step_up_box, caller);
+        colliders.extend(self.entity_collisions(step_up_box, caller));
 
         for step_height in Self::candidate_step_up_heights(
             &grounded_box,
@@ -2840,15 +2807,49 @@ impl Entity {
         collision.movement
     }
 
+    /// Vanilla `Level.getEntityCollisions`: bounding boxes of the entities `caller` cannot move
+    /// through (`Entity.canCollideWith`).
+    fn entity_collisions(&self, area: BoundingBox, caller: &dyn EntityBase) -> Vec<BoundingBox> {
+        let size = area.max.sub(&area.min);
+        if (size.x + size.y + size.z) / 3.0 < 1.0e-7 {
+            return Vec::new();
+        }
+        let world = self.world.load();
+        let area = area.expand(1.0e-7, 1.0e-7, 1.0e-7);
+        let collides = |other: &dyn EntityBase| {
+            other.get_entity().entity_id != self.entity_id
+                && (other.can_be_collided_with(caller)
+                    || (caller.collides_with_pushables() && other.is_pushable()))
+                && !caller.is_passenger_of_same_vehicle(other)
+        };
+        let mut boxes: Vec<BoundingBox> = world
+            .get_entities_at_box(&area)
+            .into_iter()
+            .filter(|other| collides(other.as_ref()))
+            .map(|other| other.get_entity().bounding_box.load())
+            .collect();
+        if caller.collides_with_pushables() {
+            boxes.extend(
+                world
+                    .get_players_at_box(&area)
+                    .into_iter()
+                    .filter(|player| collides(player.as_ref()))
+                    .map(|player| player.get_entity().bounding_box.load()),
+            );
+        }
+        boxes
+    }
+
     /// Vanilla `collide` without writing state.
     #[expect(clippy::float_cmp)]
     pub(crate) fn collide(&self, movement: Vector3<f64>, caller: &dyn EntityBase) -> Collision {
         let bounding_box = self.bounding_box.load();
 
-        let (collisions, block_positions) = self
+        let (mut collisions, block_positions) = self
             .world
             .load()
             .get_block_collisions(bounding_box.stretch(movement), caller);
+        collisions.extend(self.entity_collisions(bounding_box.stretch(movement), caller));
 
         if collisions.is_empty() {
             return Collision::free(movement);
@@ -3244,7 +3245,7 @@ impl Entity {
 
     // updateWaterState() in yarn
 
-    fn update_fluid_state(&self, caller: &dyn EntityBase) {
+    pub(crate) fn update_fluid_state(&self, caller: &dyn EntityBase) {
         let world = self.world.load();
         for fluid in self.update_fluid_interaction(caller) {
             world
@@ -4056,7 +4057,7 @@ impl Entity {
         self.velocity.store(velo);
     }
 
-    fn tick_portal(&self, caller: &dyn EntityBase) {
+    pub(crate) fn tick_portal(&self, caller: &dyn EntityBase) {
         if self.portal_cooldown.load(Ordering::Relaxed) > 0 {
             self.portal_cooldown.fetch_sub(1, Ordering::Relaxed);
         }
@@ -7159,6 +7160,128 @@ impl Entity {
         }
         scoreboard.add_player_to_team(&*world, team_name, scoreboard_name);
     }
+}
+
+/// Vanilla `Entity.push(Entity)` with `LivingEntity`'s sleeping check: the default
+/// `EntityBase::push`, also called by overrides that only gate it (boats).
+pub(crate) fn entity_push<T: EntityBase + ?Sized>(this: &T, entity: &dyn EntityBase) {
+    // Vanilla `LivingEntity.push`: sleeping entities neither push nor get pushed here.
+    if this.get_living_entity().is_some() && this.get_entity().pose.load() == EntityPose::Sleeping {
+        return;
+    }
+
+    let self_entity = this.get_entity();
+    let other_entity = entity.get_entity();
+
+    if self_entity.no_physics.load(Ordering::Relaxed)
+        || other_entity.no_physics.load(Ordering::Relaxed)
+    {
+        return;
+    }
+
+    if this.is_passenger_of_same_vehicle(entity) {
+        return;
+    }
+
+    let mut dx = other_entity.pos.load().x - self_entity.pos.load().x;
+    let mut dz = other_entity.pos.load().z - self_entity.pos.load().z;
+    let mut d = dx.abs().max(dz.abs());
+    if d >= 0.01 {
+        d = d.sqrt();
+        dx /= d;
+        dz /= d;
+        let mut d2 = 1.0 / d;
+        if d2 > 1.0 {
+            d2 = 1.0;
+        }
+        dx *= d2;
+        dz *= d2;
+        dx *= PUSH_STRENGTH;
+        dz *= PUSH_STRENGTH;
+
+        if !self_entity.has_passengers() && this.is_pushable() {
+            self_entity.push_by(Vector3::new(-dx, 0.0, -dz));
+        }
+
+        // A Java client runs only the other side's `pushEntities` on its player, so
+        // the pusher's own half stays off the Bedrock impulse
+        if !other_entity.has_passengers() && entity.is_pushable() {
+            other_entity.push_back_by(Vector3::new(dx, 0.0, dz));
+        }
+    }
+}
+
+/// Vanilla `EntitySelector.pushableBy(pusher)` tested on `other`, with the pusher's team
+/// looked up once by the caller.
+pub(crate) fn is_pushable_by(
+    pusher_team: Option<&crate::world::scoreboard::Team>,
+    other: &dyn EntityBase,
+) -> bool {
+    use crate::world::scoreboard::CollisionRule;
+
+    if other.is_spectator() || !other.is_pushable() {
+        return false;
+    }
+    let other_team = other.get_team();
+    let own_rule = pusher_team.map_or(CollisionRule::Always, |team| team.collision_rule);
+    let their_rule = other_team
+        .as_ref()
+        .map_or(CollisionRule::Always, |team| team.collision_rule);
+    if own_rule == CollisionRule::Never || their_rule == CollisionRule::Never {
+        return false;
+    }
+    let allied = pusher_team
+        .zip(other_team.as_ref())
+        .is_some_and(|(own, their)| own.name == their.name);
+    if (own_rule == CollisionRule::PushOwnTeam || their_rule == CollisionRule::PushOwnTeam)
+        && allied
+    {
+        return false;
+    }
+    !((own_rule == CollisionRule::PushOtherTeams || their_rule == CollisionRule::PushOtherTeams)
+        && !allied)
+}
+
+/// Vanilla `Entity.startRiding(vehicle)` without force: `canRide` on the passenger and the
+/// vehicle's `canAddPassenger` (given by the caller) decide. Returns whether it now rides.
+pub(crate) fn start_riding(
+    passenger: &Arc<dyn EntityBase>,
+    vehicle: &Arc<dyn EntityBase>,
+    can_add_passenger: bool,
+) -> bool {
+    let rider = passenger.get_entity();
+    let mount = vehicle.get_entity();
+    if rider
+        .get_vehicle()
+        .is_some_and(|current| current.get_entity().entity_id == mount.entity_id)
+    {
+        return false;
+    }
+    // No riding loops: the passenger may not be anywhere below the vehicle.
+    let mut below = Some(Arc::clone(vehicle));
+    while let Some(current) = below {
+        if current.get_entity().entity_id == rider.entity_id {
+            return false;
+        }
+        below = current.get_entity().get_vehicle();
+    }
+    // `canRide`: not sneaking and no boarding cooldown; withers, dragons and wardens never ride.
+    let rider_type = rider.entity_type;
+    if rider.is_sneaking()
+        || rider.riding_cooldown.load(Ordering::Relaxed) > 0
+        || rider_type == &EntityType::WITHER
+        || rider_type == &EntityType::ENDER_DRAGON
+        || rider_type == &EntityType::WARDEN
+        || !can_add_passenger
+    {
+        return false;
+    }
+    if let Some(old_vehicle) = rider.get_vehicle() {
+        old_vehicle.get_entity().remove_passenger(rider.entity_id);
+    }
+    rider.set_pose(EntityPose::Standing);
+    mount.add_passenger(Arc::clone(vehicle), Arc::clone(passenger));
+    mount.has_passenger(rider.entity_id)
 }
 
 impl Entity {

@@ -48,7 +48,8 @@ impl ItemBehaviour for ShovelItem {
                 transformer.transform(block, world.get_block_state_id(&location), face, &get_block)
         {
             if let Some(sound) = result.entry.sound {
-                world.play_sound(sound, SoundCategory::Blocks, &location.to_f64());
+                // Vanilla ShovelItem.useOn: level.playSound(player, ..).
+                world.play_block_sound_expect(player, sound, SoundCategory::Blocks, location);
             }
             if let Some(particle) = result.entry.particle {
                 world.sync_world_event(particle, location, 0);

@@ -183,6 +183,10 @@ impl EntityBase for TNTEntity {
 
     fn tick(&self, caller: &dyn EntityBase, _server: &Server) {
         let entity = &self.entity;
+        // Vanilla `setOldPosAndRot` before the tick, then `PrimedTnt.tick` opens with
+        // `handlePortal`.
+        entity.update_last_pos();
+        entity.tick_portal(caller);
 
         let mut velo = entity.velocity.load();
         velo.y -= self.get_gravity();

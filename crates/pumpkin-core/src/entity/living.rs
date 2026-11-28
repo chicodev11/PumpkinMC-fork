@@ -1412,6 +1412,17 @@ impl LivingEntity {
             .iter_mut()
             .filter_map(|(id, instance)| std::mem::take(instance.updated.get_mut()).then_some(*id))
             .collect();
+        // Vanilla ServerEntity.sendChanges: syncable attributes changed since the last tick go
+        // to the entity's own client and its trackers.
+        let syncable: Vec<Attributes> = updated
+            .iter()
+            .filter_map(|id| attributes_by_id(*id))
+            .filter(|attribute| attribute.client_syncable)
+            .cloned()
+            .collect();
+        if !syncable.is_empty() {
+            crate::entity::attributes::send_attribute_updates_for_living(self, syncable);
+        }
         if let Some(mob) = caller.get_mob() {
             for attribute in updated {
                 mob.get_mob_entity().on_attribute_updated(attribute);
@@ -5022,7 +5033,9 @@ impl EntityBase for LivingEntity {
             }
         }
 
-        if caller.get_player().is_none() {
+        // Vanilla `LivingEntity.updateUsingItem` -> `Consumable.emitParticlesAndSounds`:
+        // for players `Player.playSound` skips the eater (its client predicted it).
+        {
             let remaining_use_ticks = self.item_use_time.load(Ordering::Relaxed);
             if remaining_use_ticks > 0 {
                 let item_in_use = self
@@ -5066,10 +5079,11 @@ impl EntityBase for LivingEntity {
                     );
                 }
 
-                if caller.get_player().is_none()
-                    && item.get_data_component::<ConsumableImpl>().is_some()
-                {
+                // Vanilla `Consumable.onConsume`: `emitParticlesAndSounds` (16 particles),
+                // then `FoodProperties.onConsume` sounds for food.
+                if item.get_data_component::<ConsumableImpl>().is_some() {
                     self.play_consume_sound(caller, item);
+                    self.play_food_consume_sounds(caller, item);
                 }
                 // Vanilla `Consumable.onConsume`
                 if let Some(player) = caller.get_player()
@@ -5311,6 +5325,7 @@ impl LivingEntity {
     pub(crate) fn mob_finish_using_item(&self, caller: &dyn EntityBase, stack: &mut ItemStack) {
         if stack.get_data_component::<ConsumableImpl>().is_some() {
             self.play_consume_sound(caller, stack);
+            self.play_food_consume_sounds(caller, stack);
         }
         self.apply_consumable_effects(caller, stack);
         let remainder = stack
@@ -5343,11 +5358,58 @@ impl LivingEntity {
         let world = self.entity.world.load();
         let pos = self.entity.pos.load();
         let category = caller.sound_source();
+        // Vanilla `LivingEntity.playSound`; `Player.playSound` skips the player itself.
+        if let Some(player) = caller.get_player() {
+            let packet = pumpkin_protocol::java::client::play::CSoundEffect::new(
+                pumpkin_protocol::codec::data_component::data_to_proto_sound(
+                    &consumable.sound_event,
+                ),
+                category,
+                &pos,
+                volume,
+                pitch,
+                rng.random::<i64>(),
+            );
+            world.broadcast_packet_except(&[player.gameprofile.id], &packet);
+            return;
+        }
         match caller.get_mob().and_then(|mob| mob.mob_consume_sound(item)) {
             Some(sound) => world.play_sound_fine(sound, category, &pos, volume, pitch),
             None => {
                 world.play_sound_event_fine(&consumable.sound_event, category, &pos, volume, pitch);
             }
+        }
+    }
+
+    /// Vanilla `FoodProperties.onConsume`: the consume sound again (`Level.playSound(null, ..)`,
+    /// Neutral, pitch `triangle(1.0, 0.4)`) and, for players, the burp, both heard by everyone.
+    fn play_food_consume_sounds(&self, caller: &dyn EntityBase, item: &ItemStack) {
+        let Some(consumable) = item.get_data_component::<ConsumableImpl>() else {
+            return;
+        };
+        if item.get_data_component::<FoodImpl>().is_none() {
+            return;
+        }
+        let world = self.entity.world.load();
+        let pos = self.entity.pos.load();
+        let mut rng = rand::rng();
+        let pitch = 0.4f32.mul_add(rng.random::<f32>() - rng.random::<f32>(), 1.0);
+        world.play_sound_event_fine(
+            &consumable.sound_event,
+            SoundCategory::Neutral,
+            &pos,
+            1.0,
+            pitch,
+        );
+        if caller.get_player().is_some() {
+            let burp_pitch = 0.9 + rng.random::<f32>() * 0.1;
+            world.play_sound_fine(
+                Sound::EntityPlayerBurp,
+                SoundCategory::Players,
+                &pos,
+                0.5,
+                burp_pitch,
+            );
         }
     }
 

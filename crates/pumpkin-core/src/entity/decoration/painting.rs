@@ -12,6 +12,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::version::JavaMinecraftVersion;
@@ -48,6 +49,8 @@ const fn facing_to_horizontal(direction: BlockDirection) -> u8 {
 pub struct PaintingEntity {
     pub entity: Entity,
     variant_id: AtomicU32,
+    /// Vanilla `BlockAttachedEntity.ticksSinceLastCheck`.
+    ticks_since_last_check: AtomicU32,
 }
 
 impl PaintingEntity {
@@ -61,6 +64,7 @@ impl PaintingEntity {
         Self {
             entity,
             variant_id: AtomicU32::new(variant.id()),
+            ticks_since_last_check: AtomicU32::new(0),
         }
     }
 
@@ -187,6 +191,42 @@ impl PaintingEntity {
         fitting_variants.choose(&mut rng).copied()
     }
 
+    /// Vanilla `HangingEntity.survives` for a painting, with the boxes of
+    /// `Painting.calculateBoundingBox` built around the entity's centre.
+    fn survives(&self) -> bool {
+        let entity = &self.entity;
+        let index = entity.data.load(Ordering::Relaxed) as u8;
+        let facing = BlockDirection::from_index(index).unwrap_or(BlockDirection::South);
+        let variant = self.variant();
+        let width = f64::from(variant.width());
+        let height = f64::from(variant.height());
+        let along_x = matches!(facing, BlockDirection::East | BlockDirection::West);
+        let (size_x, size_z) = if along_x {
+            (0.0625, width)
+        } else {
+            (width, 0.0625)
+        };
+        let pop_box = BoundingBox::of_size(entity.pos.load(), size_x, height, size_z);
+        // `calculateSupportBox`: half a block into the wall, deflated by 1e-7.
+        let step = facing.to_offset();
+        let support_box = pop_box
+            .shift(Vector3::new(
+                f64::from(step.x) * -0.5,
+                f64::from(step.y) * -0.5,
+                f64::from(step.z) * -0.5,
+            ))
+            .expand(-1.0e-7, -1.0e-7, -1.0e-7);
+        super::hanging_survives(
+            entity,
+            pop_box,
+            facing,
+            BlockPos::iterate(support_box.min_block_pos(), support_box.max_block_pos()),
+            // `isSupportingBlock`
+            |block, state| state.is_solid() || crate::block::blocks::redstone::is_diode(block),
+            false,
+        )
+    }
+
     fn drop_and_remove(&self, caused_by: Option<&dyn EntityBase>) {
         let entity = &self.entity;
         if super::fire_hanging_break(entity, caused_by) {
@@ -214,6 +254,21 @@ impl PaintingEntity {
 }
 
 impl EntityBase for PaintingEntity {
+    /// Vanilla `BlockAttachedEntity.tick`: no base tick; below-world check, and every 100
+    /// ticks the painting pops off when its wall is gone.
+    fn tick(&self, caller: &dyn EntityBase, _server: &crate::server::Server) {
+        let entity = &self.entity;
+        entity.update_last_pos();
+        entity.check_out_of_world(caller);
+        let ticks = self.ticks_since_last_check.fetch_add(1, Ordering::Relaxed);
+        if ticks >= super::SURVIVAL_CHECK_INTERVAL {
+            self.ticks_since_last_check.store(0, Ordering::Relaxed);
+            if !entity.is_removed() && !self.survives() {
+                self.drop_and_remove(None);
+            }
+        }
+    }
+
     fn write_custom_nbt(&self, nbt: &mut NbtCompound) {
         let index = self.entity.data.load(Ordering::Relaxed) as u8;
         let direction = BlockDirection::from_index(index).unwrap_or(BlockDirection::South);

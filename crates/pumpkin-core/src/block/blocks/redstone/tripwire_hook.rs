@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::{
-    Block, BlockDirection, BlockStateId, HorizontalFacingExt,
+    Block, BlockDirection, BlockStateId, FacingExt, HorizontalFacingExt,
     sound::{Sound, SoundCategory},
 };
 use pumpkin_macros::pumpkin_block;
@@ -33,15 +33,24 @@ impl BlockBehaviour for TripwireHookBlock {
         let mut props = TripwireHookProperties::default(args.block);
         props.powered = false;
         props.attached = false;
-        let facing = args.direction.opposite();
-        if Self::can_survive(args.world, args.position, facing) {
-            props.facing = facing.to_cardinal_direction();
-            return props.to_state_id(args.block);
+        // Vanilla `TripWireHookBlock.getStateForPlacement`: FACING = the opposite of the first
+        // horizontal nearest looking direction that survives; no state otherwise.
+        for dir in args.nearest_looking_directions() {
+            let facing = dir.to_block_direction().opposite();
+            if Self::can_survive(args.world, args.position, facing) {
+                props.facing = facing.to_cardinal_direction();
+                return props.to_state_id(args.block);
+            }
         }
-        args.block.default_state.id
+        BlockStateId::AIR
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
+        if args.player.is_some() {
+            return BlockDirection::horizontal().into_iter().any(|dir| {
+                Self::can_survive(args.block_accessor, args.position, dir.to_block_direction())
+            });
+        }
         let direction = args.direction.unwrap_or_else(|| {
             let props = TripwireHookProperties::from_state_id(args.state.id);
             props.facing.to_block_direction().opposite()

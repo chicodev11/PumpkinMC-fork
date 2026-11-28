@@ -35,7 +35,8 @@ impl JavaClient {
             .or_else(|| world.get_entity_by_id(entity_id.0));
 
         if let Some(target) = target {
-            if !player.can_interact_with_entity(target.as_ref(), 1.0) {
+            // Vanilla isWithinEntityInteractionRange(box, 3.0)
+            if !player.can_interact_with_entity(target.as_ref(), 3.0) {
                 return;
             }
             if player.gamemode.load() == GameMode::Spectator {
@@ -184,13 +185,13 @@ impl JavaClient {
                 PlayerInteractUnknownEntityEvent::new(player, entity_id.0, action);
 
                 'after: {
+                    // Vanilla ignores an unknown entity (it may have died this tick).
                     if event.action == ActionType::Attack {
-                        error!(
-                            "Player id {} interacted with entity id {}, which was not found.",
+                        debug!(
+                            "Player id {} attacked entity id {}, which was not found.",
                             player.entity_id(),
                             event.entity_id
                         );
-                        self.try_kick(&TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, []));
                     }
                 }
             }}

@@ -52,7 +52,8 @@ impl ItemBehaviour for AxeItem {
 
         if let Some(result) = transformer.transform(block, current_state_id, face, &get_block) {
             if let Some(sound) = result.entry.sound {
-                world.play_sound(sound, SoundCategory::Blocks, &location.to_f64());
+                // Vanilla AxeItem.evaluateNewBlockState: level.playSound(player, ..).
+                world.play_block_sound_expect(player, sound, SoundCategory::Blocks, location);
             }
             if let Some(particle) = result.entry.particle {
                 world.sync_world_event(particle, location, 0);

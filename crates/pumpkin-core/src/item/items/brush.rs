@@ -121,7 +121,9 @@ impl ItemBehaviour for BrushItem {
         let block_center = location.to_centered_f64();
 
         if !(is_sand || is_gravel) {
-            world.play_sound(
+            // Vanilla BrushItem.onUseTick: level.playSound(player, ..) leaves out the brusher.
+            world.play_sound_expect(
+                player,
                 Sound::ItemBrushBrushingGeneric,
                 SoundCategory::Blocks,
                 &block_center,
@@ -157,7 +159,8 @@ impl ItemBehaviour for BrushItem {
             let next_stage_id = props.to_state_id(block);
             world.set_block_state(&location, next_stage_id, BlockFlags::NOTIFY_ALL);
 
-            world.play_sound(
+            world.play_sound_expect(
+                player,
                 if is_sand {
                     Sound::ItemBrushBrushingSand
                 } else {

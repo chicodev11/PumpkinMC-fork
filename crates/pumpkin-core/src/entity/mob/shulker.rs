@@ -414,6 +414,10 @@ impl Mob for ShulkerEntity {
         0.0
     }
 
+    fn mob_can_be_collided_with(&self, _other: &dyn EntityBase) -> bool {
+        self.mob_entity.living_entity.entity.is_alive()
+    }
+
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         let entity = &self.mob_entity.living_entity.entity;
 

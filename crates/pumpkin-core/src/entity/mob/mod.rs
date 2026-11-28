@@ -3110,6 +3110,11 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// Vanilla `Entity.canBeCollidedWith` for mobs (shulkers are solid while alive).
+    fn mob_can_be_collided_with(&self, _other: &dyn EntityBase) -> bool {
+        false
+    }
+
     fn can_fly_to_owner(&self) -> bool {
         false
     }
@@ -3179,6 +3184,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn is_pushable(&self) -> bool {
         self.mob_is_pushable()
+    }
+
+    fn can_be_collided_with(&self, other: &dyn EntityBase) -> bool {
+        self.mob_can_be_collided_with(other)
     }
 
     fn on_climbable(&self) -> bool {

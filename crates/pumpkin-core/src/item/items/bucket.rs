@@ -328,14 +328,18 @@ fn bucket_evaporates(item: &Item, world: &World, pos: &BlockPos) -> bool {
     bucket_content(item).has_tag(&tag::Fluid::MINECRAFT_WATER) && world.water_evaporates(pos)
 }
 
-fn play_bucket_evaporation(world: &Arc<World>, position: &Vector3<f64>) {
-    world.play_sound_raw(
-        Sound::BlockFireExtinguish as u16,
-        SoundCategory::Blocks,
-        position,
-        0.5,
-        (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.8, 2.6),
-    );
+/// Vanilla `BucketItem.emptyContents`: `level.playSound(user, pos, FIRE_EXTINGUISH, ..)`
+/// leaves out the user (who predicted it); a dispenser (no user) plays it to everyone.
+fn play_bucket_evaporation(world: &Arc<World>, pos: BlockPos, player: Option<&Player>) {
+    let position = pos.to_centered_f64();
+    let pitch = (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.8, 2.6);
+    let sound = Sound::BlockFireExtinguish as u16;
+    match player {
+        Some(p) => {
+            world.play_sound_raw_expect(p, sound, SoundCategory::Blocks, &position, 0.5, pitch);
+        }
+        None => world.play_sound_raw(sound, SoundCategory::Blocks, &position, 0.5, pitch),
+    }
 }
 
 fn can_be_replaced_by_fluid(block: &Block, state: &BlockState) -> bool {
@@ -348,6 +352,7 @@ fn try_place_powder_snow(
     world: &Arc<World>,
     pos: BlockPos,
     direction: BlockDirection,
+    player: Option<&Player>,
 ) -> Option<BlockPos> {
     let state = world.get_block_state(&pos);
     let target_pos = if state.replaceable() {
@@ -367,11 +372,20 @@ fn try_place_powder_snow(
         Block::POWDER_SNOW.default_state.id,
         BlockFlags::NOTIFY_ALL,
     );
-    world.play_sound(
-        Sound::ItemBucketEmptyPowderSnow,
-        SoundCategory::Blocks,
-        &target_pos.to_f64(),
-    );
+    // Vanilla SolidBucketItem.playEmptySound: level.playSound(player, pos, ..).
+    match player {
+        Some(p) => world.play_block_sound_expect(
+            p,
+            Sound::ItemBucketEmptyPowderSnow,
+            SoundCategory::Blocks,
+            target_pos,
+        ),
+        None => world.play_block_sound(
+            Sound::ItemBucketEmptyPowderSnow,
+            SoundCategory::Blocks,
+            target_pos,
+        ),
+    }
     world.emit_game_event(GameEvent::FluidPlace.name(), target_pos.to_f64());
     Some(target_pos)
 }
@@ -382,12 +396,13 @@ fn try_place_liquid(
     pos: BlockPos,
     direction: BlockDirection,
     is_sneaking: bool,
+    player: Option<&Player>,
 ) -> Option<BlockPos> {
     if item.id == Item::SULFUR_CUBE_BUCKET.id {
         return Some(pos.offset(direction.to_offset()));
     }
     if item.id == Item::POWDER_SNOW_BUCKET.id {
-        return try_place_powder_snow(world, pos, direction);
+        return try_place_powder_snow(world, pos, direction, player);
     }
 
     let (block, state) = world.get_block_and_state(&pos);
@@ -414,7 +429,7 @@ fn try_place_liquid(
     }
 
     if bucket_evaporates(item, world, &place_pos) {
-        play_bucket_evaporation(world, &place_pos.to_f64());
+        play_bucket_evaporation(world, place_pos, player);
         return Some(place_pos);
     }
 
@@ -541,9 +556,14 @@ pub(crate) fn dispense_filled_bucket_at(
     direction: BlockDirection,
     bucket_stack: &ItemStack,
 ) -> bool {
-    let Some(place_pos) =
-        try_place_liquid(world, bucket_stack.item, dispenser_pos, direction, false)
-    else {
+    let Some(place_pos) = try_place_liquid(
+        world,
+        bucket_stack.item,
+        dispenser_pos,
+        direction,
+        false,
+        None,
+    ) else {
         return false;
     };
     finish_empty_filled_bucket(world, bucket_stack, place_pos, None);
@@ -685,7 +705,9 @@ impl ItemBehaviour for FilledBucketItem {
             }
         }
 
-        let Some(place_pos) = try_place_liquid(&world, item, pos, direction, is_sneaking) else {
+        let Some(place_pos) =
+            try_place_liquid(&world, item, pos, direction, is_sneaking, Some(player))
+        else {
             return;
         };
 

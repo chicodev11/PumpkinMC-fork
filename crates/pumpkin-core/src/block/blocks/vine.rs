@@ -192,10 +192,12 @@ pub fn can_spread(world: &World, pos: &BlockPos) -> bool {
 }
 
 #[must_use]
+/// Vanilla `BlockPlaceContext.getNearestLookingDirections`. `toward_clicked` is the clicked
+/// face's opposite (what `OnPlaceArgs.direction` / `CanPlaceAtArgs.direction` already hold).
 pub fn get_nearest_looking_directions(
     player: &Player,
     replace_clicked: bool,
-    clicked_face: BlockDirection,
+    toward_clicked: BlockDirection,
 ) -> [BlockDirection; 6] {
     let mut directions: [BlockDirection; 6] = {
         let fs = player.get_entity().get_entity_facing_order();
@@ -210,7 +212,7 @@ pub fn get_nearest_looking_directions(
     };
 
     if !replace_clicked {
-        let target = clicked_face.opposite();
+        let target = toward_clicked;
         let mut index = 0;
         while index < directions.len() && directions[index] != target {
             index += 1;
@@ -235,7 +237,7 @@ impl BlockBehaviour for VineBlock {
         };
 
         let nearest_directions =
-            get_nearest_looking_directions(args.player, clicked_is_vine, args.direction);
+            get_nearest_looking_directions(args.player, args.replacing_clicked(), args.direction);
 
         for direction in nearest_directions {
             if direction != BlockDirection::Down {
@@ -299,8 +301,11 @@ impl BlockBehaviour for VineBlock {
                 )
             },
             |player| {
-                let click_dir = args.direction.unwrap_or(BlockDirection::Down);
-                get_nearest_looking_directions(player, clicked_is_vine, click_dir)
+                let toward_clicked = args.direction.unwrap_or(BlockDirection::Up);
+                let replace_clicked = args
+                    .use_item_on
+                    .is_some_and(|u| u.position == *args.position);
+                get_nearest_looking_directions(player, replace_clicked, toward_clicked)
             },
         );
 

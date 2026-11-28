@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 
@@ -12,13 +12,15 @@ use crate::world::game_event::GameEventContext;
 
 use pumpkin_data::Block;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::entity::EntityType;
+use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::tag;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::translation;
 use pumpkin_inventory::Inventory;
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
+use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -73,6 +75,11 @@ pub struct BoatEntity {
     last_yd: AtomicCell<f64>,
     left_paddle_moving: AtomicBool,
     right_paddle_moving: AtomicBool,
+    /// Vanilla `isAboveBubbleColumn` / `bubbleColumnDirectionIsDown`, set by the column this tick.
+    above_bubble_column: AtomicBool,
+    bubble_column_down: AtomicBool,
+    /// Vanilla synced `DATA_ID_BUBBLE_TIME`.
+    bubble_time: AtomicI32,
     inventory: Option<Arc<MinecartInventory>>,
 }
 
@@ -92,6 +99,9 @@ impl BoatEntity {
             last_yd: AtomicCell::new(0.0),
             left_paddle_moving: AtomicBool::new(false),
             right_paddle_moving: AtomicBool::new(false),
+            above_bubble_column: AtomicBool::new(false),
+            bubble_column_down: AtomicBool::new(false),
+            bubble_time: AtomicI32::new(0),
             inventory,
         }
     }
@@ -370,6 +380,106 @@ impl BoatEntity {
         entity.velocity.store(velocity);
     }
 
+    fn set_bubble_time(&self, time: i32) {
+        if self.bubble_time.swap(time, Ordering::Relaxed) != time {
+            self.vehicle.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::boat::ID_BUBBLE_TIME,
+                    VarInt(time),
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla `AbstractBoat.tickBubbleColumn` for the server.
+    fn tick_bubble_column(&self, controlled_by_player: bool) {
+        if !self.above_bubble_column.load(Ordering::Relaxed) {
+            self.set_bubble_time(0);
+        }
+        let mut time = self.bubble_time.load(Ordering::Relaxed);
+        if time > 0 {
+            time -= 1;
+            self.set_bubble_time(time);
+            if 60 - time - 1 > 0 && time == 0 {
+                self.set_bubble_time(0);
+                let entity = &self.vehicle.entity;
+                let world = entity.world.load();
+                let down = self.bubble_column_down.load(Ordering::Relaxed);
+                if down {
+                    self.eject_passengers();
+                    world.send_entity_status(entity, EntityStatus::BoatSink, ActorEventID::None);
+                } else {
+                    world.send_entity_status(entity, EntityStatus::BoatLaunch, ActorEventID::None);
+                }
+                // `handleBubbleColumnEffect`, skipped when the client simulates the boat.
+                if !controlled_by_player {
+                    let velocity = entity.velocity.load();
+                    entity.velocity.store(if down {
+                        Vector3::new(velocity.x, velocity.y - 0.7, velocity.z)
+                    } else {
+                        Vector3::new(velocity.x, 0.6, velocity.z)
+                    });
+                }
+            }
+            self.above_bubble_column.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// The pickup and push loop at the end of vanilla `AbstractBoat.tick`.
+    fn push_and_pickup_entities(&self) {
+        let entity = &self.vehicle.entity;
+        let world = entity.world.load();
+        let bounding_box = entity.bounding_box.load();
+        let area = bounding_box.expand(0.2, -0.01, 0.2);
+        let team = self.get_team();
+        let others: Vec<Arc<dyn EntityBase>> = world
+            .get_all_at_box(&area)
+            .into_iter()
+            .filter(|other| {
+                other.get_entity().entity_id != entity.entity_id
+                    && crate::entity::is_pushable_by(team.as_ref(), other.as_ref())
+            })
+            .collect();
+        if others.is_empty() {
+            return;
+        }
+        let can_pickup = self
+            .get_controlling_passenger()
+            .is_none_or(|passenger| passenger.get_player().is_none());
+        let width = f64::from(entity.width());
+        for other in others {
+            if self.has_passenger(other.as_ref()) {
+                continue;
+            }
+            let other_entity = other.get_entity();
+            let passenger_count = entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len();
+            if can_pickup
+                && passenger_count < self.max_passengers()
+                && !other.is_passenger()
+                // `hasEnoughSpaceFor`
+                && f64::from(other_entity.width()) < width
+                && other.get_living_entity().is_some()
+                && !other_entity
+                    .entity_type
+                    .has_tag(&tag::EntityType::MINECRAFT_CANNOT_BE_PUSHED_ONTO_BOATS)
+            {
+                if let Some(me) = world.get_entity_by_id(entity.entity_id) {
+                    // `canAddPassenger`: a free seat and the boat's eyes out of water.
+                    let can_add =
+                        passenger_count < self.max_passengers() && !entity.is_submerged_in_water();
+                    crate::entity::start_riding(&other, &me, can_add);
+                }
+            } else {
+                self.push(other.as_ref());
+            }
+        }
+    }
+
     /// Vanilla `Entity.ejectPassengers`.
     fn eject_passengers(&self) {
         let ids: Vec<i32> = self
@@ -524,8 +634,42 @@ impl EntityBase for BoatEntity {
             entity.move_entity(caller, velocity);
         }
 
-        // `applyEffectsFromBlocks`.
+        // Vanilla applies block effects twice, then the bubble column.
         entity.tick_block_collisions(caller);
+        if entity.is_removed() {
+            return;
+        }
+        entity.tick_block_collisions(caller);
+        if entity.is_removed() {
+            return;
+        }
+        self.tick_bubble_column(controlled_by_player);
+        self.push_and_pickup_entities();
+    }
+
+    /// Vanilla `AbstractBoat.push`: another boat only when it is below this one's top,
+    /// anything else only when its feet are not above this boat's bottom.
+    fn push(&self, other: &dyn EntityBase) {
+        let own_box = self.vehicle.entity.bounding_box.load();
+        let other_entity = other.get_entity();
+        let other_box = other_entity.bounding_box.load();
+        let pushes = if other_entity.entity_type.boat.is_some() {
+            other_box.min.y < own_box.max.y
+        } else {
+            other_box.min.y <= own_box.min.y
+        };
+        if pushes {
+            crate::entity::entity_push(self, other);
+        }
+    }
+
+    /// Vanilla `AbstractBoat.onAboveBubbleColumn`: the column only arms the bubble timer.
+    fn on_above_bubble_column(&self, drag_down: bool, _pos: &BlockPos) {
+        self.above_bubble_column.store(true, Ordering::Relaxed);
+        self.bubble_column_down.store(drag_down, Ordering::Relaxed);
+        if self.bubble_time.load(Ordering::Relaxed) == 0 {
+            self.set_bubble_time(60);
+        }
     }
 
     fn get_gravity(&self) -> f64 {
@@ -639,6 +783,14 @@ impl EntityBase for BoatEntity {
     }
 
     fn is_pushable(&self) -> bool {
+        true
+    }
+
+    fn can_be_collided_with(&self, _other: &dyn EntityBase) -> bool {
+        true
+    }
+
+    fn collides_with_pushables(&self) -> bool {
         true
     }
 }

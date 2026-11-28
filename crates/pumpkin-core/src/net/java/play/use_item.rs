@@ -23,6 +23,18 @@ impl JavaClient {
         }
         self.update_sequence(use_item.sequence.0);
 
+        // Vanilla handleUseItem: snap the player to the rotation the use was made with.
+        if self.version.load() >= JavaMinecraftVersion::V_1_21 {
+            let yaw = pumpkin_util::math::wrap_degrees(use_item.yaw);
+            let pitch = pumpkin_util::math::wrap_degrees(use_item.pitch);
+            let (current_yaw, current_pitch) = player.rotation();
+            if yaw != current_yaw || pitch != current_pitch {
+                let entity = player.get_entity();
+                entity.set_rotation(yaw, pitch);
+                entity.head_yaw.store(yaw);
+            }
+        }
+
         let mut item_in_hand = inventory.get_stack_in_hand(hand);
 
         let mut consume_event =
@@ -44,7 +56,7 @@ impl JavaClient {
             player.eye_position(),
             player.eye_position().add(
                 &(Vector3::rotation_vector(f64::from(use_item.pitch), f64::from(use_item.yaw))
-                    * 4.5),
+                    * player.block_interaction_range()),
             ),
             pumpkin_world::clip::ClipBlock::Outline,
             pumpkin_world::clip::ClipFluid::None,
@@ -59,7 +71,10 @@ impl JavaClient {
         });
         let (item_for_use, stack_for_use) = (item_in_hand.item, item_in_hand.clone());
         let (use_yaw, use_pitch) = if self.version.load() >= JavaMinecraftVersion::V_1_21 {
-            (use_item.yaw, use_item.pitch)
+            (
+                pumpkin_util::math::wrap_degrees(use_item.yaw),
+                pumpkin_util::math::wrap_degrees(use_item.pitch),
+            )
         } else {
             player.rotation()
         };

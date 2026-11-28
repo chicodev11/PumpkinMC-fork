@@ -4653,9 +4653,29 @@ impl World {
         player.get_entity().refresh_synced_data();
 
         chunker::update_position(player);
-        // Update commands
 
-        player.set_health(20.0);
+        // Vanilla PlayerList.sendLevelInfo (respawn and dimension change): time and weather.
+        // Health is left alone: a dimension change keeps it, a respawn already reset it.
+        player.send_time(self);
+        let (raining, rain_level, thunder_level) = {
+            let weather = self
+                .weather
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                weather.raining,
+                weather.rain_level.clamp(0.0, 1.0),
+                weather.thunder_level.clamp(0.0, 1.0),
+            )
+        };
+        if raining {
+            player.try_send_client_packet(&CGameEvent::new(GameEvent::BeginRaining, 0.0));
+            player.try_send_client_packet(&CGameEvent::new(GameEvent::RainLevelChange, rain_level));
+            player.try_send_client_packet(&CGameEvent::new(
+                GameEvent::ThunderLevelChange,
+                thunder_level,
+            ));
+        }
     }
 
     pub fn explode(
@@ -5053,13 +5073,34 @@ impl World {
             position.z.round() as i32,
         ));
         let bedrock_dimension = crate::entity::player::bedrock_dimension_id(&target_world);
+        // Java: vanilla PlayerList.respawn sends the world spawn (ServerLevel.getRespawnData),
+        // which is what compasses point at, not the bed.
+        let (world_spawn, world_spawn_yaw, world_spawn_pitch, world_spawn_dim) = self
+            .server
+            .upgrade()
+            .map(|server| {
+                let overworld = server.get_world_from_dimension(&Dimension::OVERWORLD);
+                let info = overworld.level_info.load();
+                (
+                    BlockPos::new(info.spawn_x, info.spawn_y, info.spawn_z),
+                    info.spawn_yaw,
+                    info.spawn_pitch,
+                    overworld.dimension.minecraft_name.to_string(),
+                )
+            })
+            .unwrap_or((
+                spawn_block_pos,
+                yaw,
+                pitch,
+                target_world.dimension.minecraft_name.to_string(),
+            ));
         player
             .send_packet_now_editioned(
                 &CPlayerSpawnPosition::new(
-                    spawn_block_pos,
-                    yaw,
-                    pitch,
-                    target_world.dimension.minecraft_name.to_string(),
+                    world_spawn,
+                    world_spawn_yaw,
+                    world_spawn_pitch,
+                    world_spawn_dim,
                 ),
                 &pumpkin_protocol::bedrock::client::CSetSpawnPosition {
                     spawn_position_type:

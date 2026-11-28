@@ -767,6 +767,8 @@ pub struct Player {
     pub post_effects: std::sync::Mutex<Vec<String>>,
     /// Inbound packets waiting to be processed during player tick.
     pub inbound_packets: SegQueue<RawPacket>,
+    /// Whether the creative block/entity interaction range modifiers are applied.
+    creative_ranges_applied: AtomicBool,
     shoulders: Mutex<shoulders::Shoulders>,
 }
 
@@ -1135,6 +1137,7 @@ impl Player {
             spawn_extra_particles_on_fall: AtomicBool::new(false),
             post_effects: std::sync::Mutex::new(Vec::new()),
             inbound_packets: SegQueue::new(),
+            creative_ranges_applied: AtomicBool::new(false),
         }
     }
 
@@ -2563,21 +2566,25 @@ impl Player {
             "minecraft:the_end" => 2,
             _ => 0,
         };
-        self.client.try_enqueue_packet_editioned(
-            &CPlayerSpawnPosition::new(
-                final_block_pos,
-                yaw,
-                pitch,
-                dimension.minecraft_name.to_owned(),
-            ),
-            &pumpkin_protocol::bedrock::client::CSetSpawnPosition {
-                spawn_position_type:
-                    pumpkin_protocol::bedrock::client::SpawnPositionType::PlayerRespawn,
-                block_position: final_block_pos,
-                dimension_type: bedrock_dimension.into(),
-                spawn_block_pos: final_block_pos,
-            },
-        );
+        // Vanilla ServerPlayer.setRespawnPosition sends nothing to Java clients: their compass
+        // follows the world spawn. Bedrock gets its PlayerRespawn spawn position.
+        if matches!(self.client.as_ref(), ClientPlatform::Bedrock(_)) {
+            self.client.try_enqueue_packet_editioned(
+                &CPlayerSpawnPosition::new(
+                    final_block_pos,
+                    yaw,
+                    pitch,
+                    dimension.minecraft_name.to_owned(),
+                ),
+                &pumpkin_protocol::bedrock::client::CSetSpawnPosition {
+                    spawn_position_type:
+                        pumpkin_protocol::bedrock::client::SpawnPositionType::PlayerRespawn,
+                    block_position: final_block_pos,
+                    dimension_type: bedrock_dimension.into(),
+                    spawn_block_pos: final_block_pos,
+                },
+            );
+        }
 
         *self
             .respawn_point
@@ -3546,6 +3553,7 @@ impl Player {
             client.tick_network_latency(self);
         }
         self.tick_shoulders();
+        self.update_creative_range_modifiers();
 
         if self.is_spectator() {
             self.living_entity
@@ -5713,7 +5721,12 @@ impl Player {
 
                 self.on_screen_handler_opened(&self.player_screen_handler);
 
-                self.send_health();
+                // Vanilla ServerPlayer.teleport across dimensions: the client made a new local
+                // player, so resend difficulty and effects and force health/food/xp out again.
+                self.send_difficulty_update();
+                self.send_active_effects();
+                self.last_sent_xp.store(-1, Ordering::Relaxed);
+                self.last_sent_health.store(-1, Ordering::Relaxed);
 
                 new_world.send_world_info(&player);
                 new_world.send_center_chunk(&player).await;
@@ -5825,9 +5838,47 @@ impl Player {
         client.try_enqueue_client_packet(&packet);
     }
 
+    /// Vanilla `ServerPlayer.updatePlayerAttributes`: creative mode adds `creative_mode_block_range`
+    /// (+0.5) and `creative_mode_entity_range` (+2.0) as attribute modifiers, which are synced to
+    /// the client, so its reach matches the server's.
+    fn update_creative_range_modifiers(&self) {
+        let creative = self.gamemode.load() == GameMode::Creative;
+        if self
+            .creative_ranges_applied
+            .swap(creative, Ordering::Relaxed)
+            == creative
+        {
+            return;
+        }
+        for (attribute, id, amount) in [
+            (
+                &Attributes::BLOCK_INTERACTION_RANGE,
+                "minecraft:creative_mode_block_range",
+                0.5,
+            ),
+            (
+                &Attributes::ENTITY_INTERACTION_RANGE,
+                "minecraft:creative_mode_entity_range",
+                2.0,
+            ),
+        ] {
+            self.living_entity.update_attribute(attribute, |inst| {
+                if creative {
+                    inst.add_or_replace_modifier(Modifier {
+                        id: id.to_string(),
+                        amount,
+                        operation: ModifierOperation::Add,
+                    });
+                } else {
+                    inst.remove_modifier(id);
+                }
+            });
+        }
+    }
+
     pub fn block_interaction_range(&self) -> f64 {
         let is_bedrock = matches!(self.client.as_ref(), ClientPlatform::Bedrock(_));
-        if self.gamemode.load() == GameMode::Creative {
+        if is_bedrock && self.gamemode.load() == GameMode::Creative {
             5.0
         } else if is_bedrock {
             let attr = self
@@ -5842,7 +5893,7 @@ impl Player {
 
     pub fn entity_interaction_range(&self) -> f64 {
         let is_bedrock = matches!(self.client.as_ref(), ClientPlatform::Bedrock(_));
-        if self.gamemode.load() == GameMode::Creative {
+        if is_bedrock && self.gamemode.load() == GameMode::Creative {
             5.0
         } else if is_bedrock {
             let attr = self
@@ -6370,7 +6421,12 @@ impl Player {
         // weapon modifiers again.
         crate::entity::attributes::send_attribute_updates_for_living(
             &self.living_entity,
-            vec![Attributes::ATTACK_SPEED, Attributes::ATTACK_DAMAGE],
+            vec![
+                Attributes::ATTACK_SPEED,
+                Attributes::ATTACK_DAMAGE,
+                Attributes::BLOCK_INTERACTION_RANGE,
+                Attributes::ENTITY_INTERACTION_RANGE,
+            ],
         );
     }
 
@@ -6640,7 +6696,6 @@ impl Player {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             abilities.set_for_gamemode(gamemode);
         };
-        self.send_abilities_update();
 
         if gamemode == GameMode::Creative {
             self.get_entity().extinguish();
@@ -6692,6 +6747,11 @@ impl Player {
                 player_game_type: gamemode.into(),
             },
         );
+        // Vanilla ServerPlayer.setGameMode: CHANGE_GAME_MODE first, then onUpdateAbilities, since
+        // the client resets its abilities to the mode's defaults on that event.
+        self.send_abilities_update();
+        // Creative reach modifiers right away rather than on the next tick.
+        self.update_creative_range_modifiers();
 
         // Vanilla `ServerPlayerGameMode.setGameModeForPlayer`: spectators stop counting
         self.world().update_sleeping_player_list();

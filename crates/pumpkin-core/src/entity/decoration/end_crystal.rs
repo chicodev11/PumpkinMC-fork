@@ -2,11 +2,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::entity::{Entity, EntityBase, living::LivingEntity};
+use crate::server::Server;
 use pumpkin_data::{
     damage::DamageType,
     tag::{self, Taggable},
 };
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_world::world::BlockFlags;
 
 pub struct EndCrystalEntity {
     entity: Entity,
@@ -67,6 +69,24 @@ impl EndCrystalEntity {
 }
 
 impl EntityBase for EndCrystalEntity {
+    /// Vanilla `EndCrystal.tick`: no base tick, but block effects, portals, and fire under the
+    /// crystal while the dimension has a dragon fight.
+    fn tick(&self, caller: &dyn EntityBase, _server: &Server) {
+        let entity = &self.entity;
+        entity.update_last_pos();
+        entity.tick_block_collisions(caller);
+        entity.tick_portal(caller);
+        if entity.is_removed() {
+            return;
+        }
+        let world = entity.world.load();
+        let pos = entity.block_pos.load();
+        if world.dragon_fight.is_some() && world.get_block_state(&pos).is_air() {
+            let fire = crate::block::blocks::fire::FireBlockBase::get_state(&world, &pos);
+            world.set_block_state(&pos, fire, BlockFlags::NOTIFY_ALL);
+        }
+    }
+
     fn can_hit(&self) -> bool {
         true
     }

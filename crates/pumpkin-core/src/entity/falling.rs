@@ -335,6 +335,8 @@ impl EntityBase for FallingEntity {
             entity.remove();
             return;
         }
+        // Vanilla `setOldPosAndRot` before the tick.
+        entity.update_last_pos();
         if self.start_y.load().is_nan() {
             self.start_y.store(entity.pos.load().y);
         }
@@ -348,12 +350,17 @@ impl EntityBase for FallingEntity {
         let from = entity.pos.load();
         entity.move_entity(caller, velo);
         entity.tick_block_collisions(caller);
+        // Vanilla `handlePortal` right after the block effects.
+        entity.tick_portal(caller);
         // Vanilla `setRequiresPrecisePosition(horizontalCollision || verticalCollision)`.
         entity.requires_precise_position.store(
             entity.horizontal_collision.load(Ordering::Relaxed)
                 || entity.vertical_collision.load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
+        if entity.is_removed() {
+            return;
+        }
         // Vanilla: concrete powder lands as soon as it is in water, and a fast one also catches
         // the source water it passed through this tick.
         let (solidify, water_pos) = self.concrete_water_landing(from);

@@ -100,7 +100,8 @@ impl JigsawBlock {
 impl BlockBehaviour for JigsawBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         let mut props = JigsawLikeProperties::default(args.block);
-        let front = args.direction;
+        // Vanilla `JigsawBlock.getStateForPlacement`: front = getClickedFace().
+        let front = args.direction.opposite();
         let top = if front == BlockDirection::Up || front == BlockDirection::Down {
             horizontal_facing_to_dir(args.player.get_entity().get_horizontal_facing()).opposite()
         } else {

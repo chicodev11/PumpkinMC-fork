@@ -1,7 +1,4 @@
-use crate::block::{
-    BlockBehaviour, BlockIsReplacing, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-};
-use crate::entity::EntityBase;
+use crate::block::{BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{Facing, LadderLikeProperties};
 use pumpkin_data::fluid::Fluid;
@@ -17,9 +14,7 @@ pub struct LadderBlock;
 
 impl BlockBehaviour for LadderBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
-        if args.replacing == BlockIsReplacing::None
-            || matches!(args.replacing, BlockIsReplacing::Water(_))
-        {
+        if !args.replacing_clicked() {
             let behind_pos = args.position.offset(args.direction.to_offset());
             let (behind_block, behind_state_id) = args.world.get_block_and_state_id(&behind_pos);
             if behind_block == &Block::LADDER {
@@ -32,20 +27,7 @@ impl BlockBehaviour for LadderBlock {
         let mut props = LadderLikeProperties::default(args.block);
         props.waterlogged = args.replacing.water_source();
 
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-        if args.replacing == BlockIsReplacing::None
-            || matches!(args.replacing, BlockIsReplacing::Water(_))
-        {
-            let face = args.direction.to_facing();
-            if let Some(i) = directions.iter().position(|&d| d == face)
-                && i > 0
-            {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        }
-
-        for dir in directions {
+        for dir in args.nearest_looking_directions() {
             if dir == Facing::Up || dir == Facing::Down {
                 continue;
             }

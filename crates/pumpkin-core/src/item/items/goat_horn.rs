@@ -65,7 +65,9 @@ impl ItemBehaviour for GoatHornItem {
         }
 
         player.living_entity.set_active_hand(hand, stack, duration);
-        world.play_sound_raw(
+        // Vanilla InstrumentItem.play: level.playSound(player, player, ..) leaves out the player.
+        world.play_sound_raw_expect(
+            player,
             instrument.sound() as u16,
             SoundCategory::Records,
             &pos,

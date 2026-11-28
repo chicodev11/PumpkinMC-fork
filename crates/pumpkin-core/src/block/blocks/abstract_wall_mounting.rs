@@ -7,7 +7,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
 
 use crate::{
-    block::{BlockIsReplacing, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs},
+    block::{CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs},
     entity::player::Player,
 };
 
@@ -38,22 +38,7 @@ pub trait WallMountedBlock: Send + Sync {
         &self,
         args: &OnPlaceArgs<'_>,
     ) -> (AttachFace, HorizontalFacing) {
-        let mut directions = args.player.get_entity().get_entity_facing_order();
-
-        if args.replacing == BlockIsReplacing::None {
-            let face = args.direction.to_facing();
-            let mut i = 0;
-            while i < directions.len() && directions[i] != face {
-                i += 1;
-            }
-
-            if i > 0 {
-                directions.copy_within(0..i, 1);
-                directions[0] = face;
-            }
-        }
-
-        for dir in directions {
+        for dir in args.nearest_looking_directions() {
             let direction = dir.to_block_direction();
             if self.can_place_at(args.world, args.position, direction) {
                 return self.get_placement_face(args.player, direction);

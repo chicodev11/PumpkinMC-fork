@@ -263,17 +263,18 @@ pub(super) fn velocity(
     } else {
         0
     };
-    let mut friction = if has_loot {
-        0.98
-    } else {
-        0.98 + f64::from(15 - signal) * 0.001
-    };
+    // Vanilla computes the factor in floats.
+    let mut friction = 0.98f32;
+    if !has_loot {
+        friction += f32::from(15 - signal) * 0.001;
+    }
     if entity
         .touching_water
         .load(std::sync::atomic::Ordering::Relaxed)
     {
         friction *= 0.95;
     }
+    let friction = f64::from(friction);
     velocity.multiply(friction, 0.0, friction)
 }
 

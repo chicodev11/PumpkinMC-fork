@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::entity::player::Player;
@@ -14,6 +14,7 @@ use pumpkin_data::sound::Sound;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::{CSetEntityMetadata, Metadata};
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 
 /// An item frame or glow item frame.
@@ -33,6 +34,8 @@ pub struct ItemFrameEntity {
     item_drop_chance: AtomicCell<f32>,
     invisible: AtomicBool,
     fixed: AtomicBool,
+    /// Vanilla `BlockAttachedEntity.ticksSinceLastCheck`.
+    ticks_since_last_check: AtomicU32,
 }
 
 impl ItemFrameEntity {
@@ -52,6 +55,7 @@ impl ItemFrameEntity {
             item_drop_chance: AtomicCell::new(1.0),
             invisible: AtomicBool::new(false),
             fixed: AtomicBool::new(false),
+            ticks_since_last_check: AtomicU32::new(0),
         }
     }
 
@@ -272,6 +276,37 @@ impl ItemFrameEntity {
 }
 
 impl ItemFrameEntity {
+    /// Vanilla `ItemFrame.survives`: fixed frames always stay; otherwise the frame's box
+    /// (`getPopBox`, always the non-map size) must be clear and the block behind solid, or a
+    /// repeater/comparator for a frame on a wall.
+    fn survives(&self) -> bool {
+        if self.is_fixed() {
+            return true;
+        }
+        let entity = &self.entity;
+        let facing = self.get_facing();
+        let pos = entity.block_pos.load();
+        let step = facing.to_offset();
+        let center = Vector3::new(
+            f64::from(pos.0.x) + 0.5 - f64::from(step.x) * 0.46875,
+            f64::from(pos.0.y) + 0.5 - f64::from(step.y) * 0.46875,
+            f64::from(pos.0.z) + 0.5 - f64::from(step.z) * 0.46875,
+        );
+        let size = |axis_step: i32| if axis_step == 0 { 0.75 } else { 0.0625 };
+        let pop_box = BoundingBox::of_size(center, size(step.x), size(step.y), size(step.z));
+        let horizontal = facing.is_horizontal();
+        super::hanging_survives(
+            entity,
+            pop_box,
+            facing,
+            [pos.offset(facing.opposite().to_offset())],
+            |block, state| {
+                state.is_solid() || (horizontal && crate::block::blocks::redstone::is_diode(block))
+            },
+            true,
+        )
+    }
+
     /// Vanilla `removeFramedMap`: the map forgets this frame's marker.
     fn remove_framed_map(&self, stack: &ItemStack) {
         let Some(id) = stack.get_data_component::<pumpkin_data::data_component_impl::MapIdImpl>()
@@ -332,8 +367,24 @@ impl ItemFrameEntity {
 }
 
 impl EntityBase for ItemFrameEntity {
+    /// Vanilla `BlockAttachedEntity.tick`: no base tick; below-world check, and every 100
+    /// ticks the frame pops off when its support is gone.
     fn tick(&self, caller: &dyn EntityBase, server: &Server) {
-        self.entity.tick(caller, server);
+        let entity = &self.entity;
+        entity.update_last_pos();
+        entity.check_out_of_world(caller);
+        let ticks = self.ticks_since_last_check.fetch_add(1, Ordering::Relaxed);
+        if ticks >= super::SURVIVAL_CHECK_INTERVAL {
+            self.ticks_since_last_check.store(0, Ordering::Relaxed);
+            if !entity.is_removed() && !self.survives() && !super::fire_hanging_break(entity, None)
+            {
+                // `ItemFrame.dropItem(level, null)`: break sound, frame and item drop.
+                entity.play_sound(self.get_break_sound());
+                self.drop_item(None, true);
+                entity.remove();
+                return;
+            }
+        }
         self.tick_framed_map(server);
     }
 
