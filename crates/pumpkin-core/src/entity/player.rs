@@ -1891,7 +1891,7 @@ impl Player {
         damage = damage.max(0.0);
 
         let pos = victim_entity.pos.load();
-        let attack_type = AttackType::new(self, attack_cooldown_progress as f32);
+        let attack_type = AttackType::new(self, victim.as_ref(), attack_cooldown_progress as f32);
 
         let is_mace_smash = item_stack.item.id == pumpkin_data::item::Item::MACE.id
             && can_smash_attack(&self.living_entity);
@@ -2885,7 +2885,9 @@ impl Player {
         if let Some(vehicle) = self.get_entity().get_vehicle() {
             vehicle
                 .get_entity()
-                .remove_passenger(self.get_entity().entity_id);
+                // The bed position replaces the dismount spot (vanilla setPosToBed right after
+                // stopRiding); a dismount teleport here would leave the client on the floor.
+                .remove_passenger_before_teleport(self.get_entity().entity_id);
         }
 
         self.get_entity().set_pose(EntityPose::Sleeping);
@@ -3566,14 +3568,17 @@ impl Player {
                     let player_pos = self.living_entity.entity.pos.load();
                     if player_pos != target_pos {
                         self.living_entity.entity.set_pos(target_pos);
+                        let target_entity = target.get_entity();
+                        self.living_entity
+                            .entity
+                            .set_rotation(target_entity.yaw.load(), target_entity.pitch.load());
                         if let Some(p) = self.world().get_player_by_uuid(self.gameprofile.id) {
                             crate::world::chunker::update_position(&p);
                         }
                     }
                 } else {
                     // Target no longer exists, reset camera back to player
-                    self.camera_target_id.store(None);
-                    self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
+                    self.apply_camera(None);
                 }
             }
         }
@@ -4459,13 +4464,39 @@ impl Player {
         if self.camera_change_cancelled(target_id) {
             return;
         }
-        if target_id == self.entity_id() {
-            self.camera_target_id.store(None);
-            self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
-        } else {
-            self.camera_target_id.store(Some(target_id));
-            self.try_send_client_packet(&CSetCamera::new(target_id.into()));
+        self.apply_camera((target_id != self.entity_id()).then_some(target_id));
+    }
+
+    /// Vanilla `ServerPlayer.setCamera` without the plugin event: the client is teleported to
+    /// the new camera position (its own position when leaving, which the tick kept at the
+    /// target) before `ClientboundSetCameraPacket`, so it stays there instead of snapping back.
+    fn apply_camera(&self, new: Option<i32>) {
+        if self.camera_target_id.load() == new {
+            return;
         }
+        let world = self.world();
+        let camera_pos = match new {
+            Some(id) => {
+                let target = world
+                    .get_player_by_id(id)
+                    .map(|p| Arc::clone(&p) as Arc<dyn EntityBase>)
+                    .or_else(|| world.get_entity_by_id(id));
+                let Some(target) = target else {
+                    return;
+                };
+                target.get_entity().pos.load()
+            }
+            None => self.living_entity.entity.pos.load(),
+        };
+        self.camera_target_id.store(new);
+        let entity = &self.living_entity.entity;
+        self.request_teleport(camera_pos, entity.yaw.load(), entity.pitch.load());
+        if new.is_some()
+            && let Some(p) = world.get_player_by_uuid(self.gameprofile.id)
+        {
+            crate::world::chunker::update_position(&p);
+        }
+        self.try_send_client_packet(&CSetCamera::new(new.unwrap_or(self.entity_id()).into()));
     }
 
     /// Paper `PlayerStartSpectatingEntityEvent` / `PlayerStopSpectatingEntityEvent`
@@ -4508,8 +4539,7 @@ impl Player {
 
     /// Resets the player's camera back to their own perspective.
     pub fn reset_camera(&self) {
-        self.camera_target_id.store(None);
-        self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
+        self.set_camera_entity_id(self.entity_id());
     }
 
     /// Gets the entity ID of the entity that the player's camera is currently attached to,
@@ -6633,8 +6663,7 @@ impl Player {
         }
 
         if gamemode != GameMode::Spectator && self.camera_target_id.load().is_some() {
-            self.camera_target_id.store(None);
-            self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
+            self.set_camera_entity_id(self.entity_id());
         }
 
         self.living_entity.entity.invulnerable.store(

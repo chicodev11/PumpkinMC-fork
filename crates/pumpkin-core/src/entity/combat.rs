@@ -30,7 +30,7 @@ pub enum AttackType {
 }
 
 impl AttackType {
-    pub fn new(player: &Player, attack_cooldown_progress: f32) -> Self {
+    pub fn new(player: &Player, victim: &dyn EntityBase, attack_cooldown_progress: f32) -> Self {
         let entity = &player.get_entity();
 
         let sprinting = entity.is_sprinting();
@@ -46,7 +46,18 @@ impl AttackType {
             return Self::Knockback;
         }
 
-        if is_strong && !on_ground && fall_distance > 0.0 {
+        // Vanilla Player.canCriticalAttack(target)
+        let can_crit = fall_distance > 0.0
+            && !on_ground
+            && !EntityBase::on_climbable(player)
+            && !entity.is_in_water()
+            && !player
+                .living_entity
+                .has_effect(&pumpkin_data::effect::StatusEffect::BLINDNESS)
+            && !entity.has_vehicle()
+            && victim.get_living_entity().is_some()
+            && !sprinting;
+        if is_strong && can_crit {
             return Self::Critical;
         }
 

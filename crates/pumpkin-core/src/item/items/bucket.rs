@@ -480,14 +480,16 @@ fn finish_empty_filled_bucket(
     place_pos: BlockPos,
     player: Option<&Player>,
 ) {
+    // Vanilla BucketItem.playEmptySound: level.playSound(user, ...) leaves out the user, whose
+    // client already played it when predicting the placement.
+    let play = |sound: Sound, category: SoundCategory| match player {
+        Some(p) => world.play_block_sound_expect(p, sound, category, place_pos),
+        None => world.play_sound(sound, category, &place_pos.to_centered_f64()),
+    };
     let item = bucket_stack.item;
     let evaporated = bucket_evaporates(item, world, &place_pos);
     if item.id == Item::SULFUR_CUBE_BUCKET.id {
-        world.play_sound(
-            get_empty_sound(item),
-            SoundCategory::Neutral,
-            &place_pos.to_f64(),
-        );
+        play(get_empty_sound(item), SoundCategory::Neutral);
     } else if item.id != Item::POWDER_SNOW_BUCKET.id && !evaporated {
         let sound_category = if get_mob_for_bucket(item).is_some() {
             SoundCategory::Neutral
@@ -495,14 +497,10 @@ fn finish_empty_filled_bucket(
             SoundCategory::Blocks
         };
 
-        world.play_sound(get_empty_sound(item), sound_category, &place_pos.to_f64());
+        play(get_empty_sound(item), sound_category);
         world.emit_game_event(GameEvent::FluidPlace.name(), place_pos.to_f64());
     } else if get_mob_for_bucket(item).is_some() && evaporated {
-        world.play_sound(
-            get_empty_sound(item),
-            SoundCategory::Neutral,
-            &place_pos.to_f64(),
-        );
+        play(get_empty_sound(item), SoundCategory::Neutral);
     }
 
     if let Some((entity_type, _)) = get_mob_for_bucket(item) {
@@ -597,10 +595,12 @@ impl ItemBehaviour for EmptyBucketItem {
             }
         }
 
-        world.play_sound(
+        // Vanilla plays the fill sound through player.playSound, which leaves out the player.
+        world.play_block_sound_expect(
+            player,
             get_fill_sound(filled_item),
             SoundCategory::Blocks,
-            &block_pos.to_f64(),
+            block_pos,
         );
         world.emit_game_event(GameEvent::FluidPickup.name(), block_pos.to_f64());
         player.increment_stat(StatisticCategory::Used, i32::from(item.id), 1);
@@ -668,10 +668,7 @@ impl ItemBehaviour for FilledBucketItem {
         let direction = hit.direction;
         let is_sneaking = player.get_entity().is_sneaking();
 
-        let Some(place_pos) = try_place_liquid(&world, item, pos, direction, is_sneaking) else {
-            return;
-        };
-
+        // Paper fires PlayerBucketEmptyEvent before the fluid is placed, and a cancel stops it.
         if let Some(server) = world.server.upgrade()
             && let Some(player_arc) = world.get_player_by_uuid(player.gameprofile.id)
         {
@@ -682,7 +679,15 @@ impl ItemBehaviour for FilledBucketItem {
                     item.registry_key.to_string(),
                 );
             server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                player.sync_inventory_to_client();
+                return;
+            }
         }
+
+        let Some(place_pos) = try_place_liquid(&world, item, pos, direction, is_sneaking) else {
+            return;
+        };
 
         let bucket_stack = player.inventory.get_stack_in_hand(hand);
         finish_empty_filled_bucket(&world, &bucket_stack, place_pos, Some(player));

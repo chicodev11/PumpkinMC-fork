@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 
 use pumpkin_data::translation;
 use pumpkin_protocol::bedrock::client::CMovePlayer;
-use pumpkin_protocol::java::client::play::{CPlayerPosition, CSetCamera};
+use pumpkin_protocol::java::client::play::CPlayerPosition;
 use pumpkin_protocol::java::server::play::SPlayerInput;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::{vector3::Vector3, wrap_degrees};
@@ -70,8 +70,7 @@ impl Player {
             && self.gamemode.load() == GameMode::Spectator
             && self.camera_target_id.load().is_some()
         {
-            self.camera_target_id.store(None);
-            self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
+            self.set_camera_entity_id(self.entity_id());
         }
 
         let entity = self.get_entity();
@@ -233,11 +232,14 @@ impl Player {
             return ClientMoveOutcome::Applied;
         }
 
+        // Vanilla handlePlayerPositionChange ignores every move from a sleeping player and only
+        // teleports it back when it is more than one block off.
         if self.sleeping_since.load().is_some()
             && let Some(pos) = target
-            && (pos - last_pos).length_squared() > 1.0
         {
-            self.reject_client_move();
+            if (pos - last_pos).length_squared() > 1.0 {
+                self.reject_client_move();
+            }
             return ClientMoveOutcome::Rejected;
         }
 

@@ -91,27 +91,27 @@ impl BlockBehaviour for TrapDoorBlock {
 
         let powered = block_receives_redstone_power(args.world, args.position);
 
-        let player_facing = args.player.get_entity().get_horizontal_facing();
-
-        // Correct facing logic using Option unwrap
-        let facing = args
-            .direction
-            .to_horizontal_facing()
-            .unwrap_or(player_facing);
-
-        trapdoor_props.facing = facing;
-
-        trapdoor_props.half = match args.direction {
-            BlockDirection::Up => Half::Top,
-            BlockDirection::Down => Half::Bottom,
-            _ => {
-                if args.use_item_on.cursor_pos.y > 0.5 {
-                    Half::Top
-                } else {
-                    Half::Bottom
-                }
-            }
-        };
+        // Vanilla TrapDoorBlock.getStateForPlacement. `args.direction` is the clicked face reversed.
+        let clicked_face = args.direction.opposite();
+        let replacing_clicked = matches!(
+            args.replacing,
+            crate::block::BlockIsReplacing::Other | crate::block::BlockIsReplacing::Itself(_)
+        );
+        if !replacing_clicked && let Some(facing) = clicked_face.to_horizontal_facing() {
+            trapdoor_props.facing = facing;
+            trapdoor_props.half = if args.use_item_on.cursor_pos.y > 0.5 {
+                Half::Top
+            } else {
+                Half::Bottom
+            };
+        } else {
+            trapdoor_props.facing = args.player.get_entity().get_horizontal_facing().opposite();
+            trapdoor_props.half = if clicked_face == BlockDirection::Up {
+                Half::Bottom
+            } else {
+                Half::Top
+            };
+        }
 
         trapdoor_props.powered = powered;
         trapdoor_props.open = powered;

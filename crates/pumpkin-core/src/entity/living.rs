@@ -458,6 +458,22 @@ impl LivingEntity {
     }
 
     fn make_voice_sound(&self, caller: &dyn EntityBase, sound: Sound) {
+        // Vanilla Player.playSound: level().playSound(this, ...) leaves out the player itself,
+        // whose client plays its own hurt/death sound from the damage event / entity event 3.
+        if let Some(player) = caller.get_player() {
+            if self.entity.is_silent() {
+                return;
+            }
+            self.entity.world.load().play_sound_raw_expect(
+                player,
+                sound as u16,
+                caller.sound_source(),
+                &self.entity.pos.load(),
+                1.0,
+                self.get_pitch(),
+            );
+            return;
+        }
         let custom_sound = caller.get_mob().and_then(|mob| mob.as_custom_sound());
         self.make_sound(
             sound,
@@ -3814,7 +3830,23 @@ impl LivingEntity {
         Self::death_sound_for_entity(self.entity.entity_type)
     }
 
-    fn hurt_sound(&self, entity: &dyn EntityBase) -> Sound {
+    fn hurt_sound(
+        &self,
+        entity: &dyn EntityBase,
+        damage_type: &pumpkin_data::damage::DamageType,
+    ) -> Sound {
+        // Vanilla Player.getHurtSound: source.type().effects().sound()
+        if entity.get_player().is_some() {
+            use pumpkin_data::damage::DamageEffects;
+            return match damage_type.effects.unwrap_or(DamageEffects::Hurt) {
+                DamageEffects::Hurt => Sound::EntityPlayerHurt,
+                DamageEffects::Thorns => Sound::EnchantThornsHit,
+                DamageEffects::Drowning => Sound::EntityPlayerHurtDrown,
+                DamageEffects::Burning => Sound::EntityPlayerHurtOnFire,
+                DamageEffects::Poking => Sound::EntityPlayerHurtSweetBerryBush,
+                DamageEffects::Freezing => Sound::EntityPlayerHurtFreeze,
+            };
+        }
         if let Some(sound_source) = entity.get_mob().and_then(|x| x.as_custom_sound())
             && let Some(audio) = sound_source.hurt_sound()
         {
@@ -4521,7 +4553,7 @@ impl LivingEntity {
             if let Some(mob) = caller.get_mob() {
                 mob.reset_ambient_sound_time();
             }
-            self.make_voice_sound(caller, self.hurt_sound(caller));
+            self.make_voice_sound(caller, self.hurt_sound(caller, &damage_type));
         }
 
         if new_health <= 0.0 {

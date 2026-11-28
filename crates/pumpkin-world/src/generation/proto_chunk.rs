@@ -2202,6 +2202,24 @@ impl BlockPlacer for ProtoChunk {
     fn add_block_entity(&mut self, nbt: NbtCompound) {
         self.add_block_entity(nbt);
     }
+
+    fn get_height(
+        &self,
+        heightmap: crate::generation::structure::template::processor::HeightmapType,
+        x: i32,
+        z: i32,
+    ) -> Option<i32> {
+        use crate::generation::structure::template::processor::HeightmapType as H;
+        let heightmap = match heightmap {
+            H::WorldSurfaceWg => HeightMap::WorldSurfaceWg,
+            H::WorldSurface => HeightMap::WorldSurface,
+            H::OceanFloorWg => HeightMap::OceanFloorWg,
+            H::OceanFloor => HeightMap::OceanFloor,
+            H::MotionBlocking => HeightMap::MotionBlocking,
+            H::MotionBlockingNoLeaves => HeightMap::MotionBlockingNoLeaves,
+        };
+        Some(self.get_top_y(&heightmap, x, z))
+    }
 }
 
 impl GenerationCache for ProtoChunk {

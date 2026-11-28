@@ -167,7 +167,11 @@ pub trait FlowingFluid: Send + Sync {
         let below_pos = block_pos.down();
         let below_state = world.get_block_state(&below_pos);
         let below_block = Block::from_state_id(below_state.id);
-        let is_hole = physics::can_be_replaced(below_state, below_block, fluid);
+        let is_hole = physics::can_pass_through_wall(
+            BlockDirection::Down,
+            world.get_block_state(block_pos),
+            below_state,
+        ) && physics::can_be_replaced(below_state, below_block, fluid);
 
         // Try to flow down first
         if is_hole {
@@ -229,7 +233,8 @@ pub trait FlowingFluid: Send + Sync {
         fluid: &'static Fluid,
         block_pos: &BlockPos,
     ) -> Option<FlowingFluidProperties> {
-        let current_state_id = world.get_block_state_id(block_pos);
+        let current_state = world.get_block_state(block_pos);
+        let current_state_id = current_state.id;
         // Sources never change
         if let Some(current_props) = FlowingFluidProperties::from_state_id(current_state_id, fluid)
             && current_props.level == Level::L8
@@ -248,10 +253,13 @@ pub trait FlowingFluid: Send + Sync {
             BlockDirection::East,
         ] {
             let neighbor_pos = block_pos.offset(direction.to_offset());
-            let neighbor_state_id = world.get_block_state_id(&neighbor_pos);
-            let Some(neighbor_props) = self.get_effective_props(fluid, neighbor_state_id) else {
+            let neighbor_state = world.get_block_state(&neighbor_pos);
+            let Some(neighbor_props) = self.get_effective_props(fluid, neighbor_state.id) else {
                 continue;
             };
+            if !physics::can_pass_through_wall(direction, current_state, neighbor_state) {
+                continue;
+            }
 
             // Count horizontal non-falling sources for infinite source formation
             if neighbor_props.level == Level::L8 && neighbor_props.falling == Falling::False {
@@ -288,9 +296,11 @@ pub trait FlowingFluid: Send + Sync {
 
         // Then: if there's water above, this block is ALWAYS level 8, falling=true
         let above_pos = block_pos.up();
-        let above_state_id = world.get_block_state_id(&above_pos);
+        let above_state = world.get_block_state(&above_pos);
 
-        if self.has_fluid_at(fluid, above_state_id) {
+        if self.has_fluid_at(fluid, above_state.id)
+            && physics::can_pass_through_wall(BlockDirection::Up, current_state, above_state)
+        {
             return Some(self.get_flowing(Level::L8, true));
         }
 

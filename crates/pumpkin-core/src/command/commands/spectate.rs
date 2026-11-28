@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use pumpkin_data::translation;
-use pumpkin_protocol::java::client::play::CSetCamera;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::{GameMode, PermissionLvl};
@@ -52,8 +51,7 @@ impl CommandExecutor for StopSpectateExecutor {
             return Err(ERROR_NOT_SPECTATOR.create_without_context(display_name));
         }
 
-        player.camera_target_id.store(None);
-        player.try_send_client_packet(&CSetCamera::new(player.entity_id().into()));
+        player.reset_camera();
 
         context.source.send_feedback(
             TextComponent::translate_cross(
@@ -104,12 +102,7 @@ impl CommandExecutor for SpectateTargetExecutor {
         }
 
         let target_id = target_entity.entity_id;
-        player.camera_target_id.store(Some(target_id));
-        let pos = target_entity.pos.load();
-        let yaw = target_entity.yaw.load();
-        let pitch = target_entity.pitch.load();
-        player.try_send_client_packet(&CSetCamera::new(target_id.into()));
-        player.teleport(pos, Some(yaw), Some(pitch), player_world);
+        player.set_camera_entity_id(target_id);
 
         let target_name = target.get_display_name();
         context.source.send_feedback(

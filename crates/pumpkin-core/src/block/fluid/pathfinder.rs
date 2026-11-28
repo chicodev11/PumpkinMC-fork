@@ -13,7 +13,11 @@ fn is_hole(world: &Arc<World>, fluid: &'static Fluid, pos: &BlockPos) -> bool {
     let below_pos = pos.down();
     let below_state = world.get_block_state(&below_pos);
     let below_block = Block::from_state_id(below_state.id);
-    physics::can_be_replaced(below_state, below_block, fluid)
+    physics::can_pass_through_wall(
+        BlockDirection::Down,
+        world.get_block_state(pos),
+        below_state,
+    ) && physics::can_be_replaced(below_state, below_block, fluid)
 }
 
 /// Determines valid spread directions for fluid flow using hole-first priority.
@@ -29,6 +33,7 @@ pub fn get_spread<T: FlowingFluid + Sync + ?Sized>(
 ) -> [Option<(BlockDirection, FlowingFluidProperties)>; 4] {
     let mut min_dist = 1000;
     let mut result = [None; 4];
+    let current_state = world.get_block_state(block_pos);
 
     for (slot, direction) in [
         BlockDirection::North,
@@ -47,7 +52,8 @@ pub fn get_spread<T: FlowingFluid + Sync + ?Sized>(
         let side_fluid_props = fluid_impl.get_effective_props(fluid, side_state_id);
 
         // Check if we can pass through (not a solid source block or waterlogged)
-        if !physics::can_be_replaced(side_state, side_block, fluid)
+        if !physics::can_pass_through_wall(direction, current_state, side_state)
+            || !physics::can_be_replaced(side_state, side_block, fluid)
             || side_fluid_props
                 .as_ref()
                 .is_some_and(|p| p.level == Level::L8 && p.falling != Falling::True)
@@ -132,9 +138,12 @@ pub fn get_in_flow_down_distance_iterative<T: FlowingFluid + Sync + ?Sized>(
         let (pos, distance) = queue[head];
         head += 1;
 
+        let pos_state = world.get_block_state(&pos);
         let below_state = world.get_block_state(&pos.down());
         let below_block = Block::from_state_id(below_state.id);
-        if physics::can_be_replaced(below_state, below_block, fluid) {
+        if physics::can_pass_through_wall(BlockDirection::Down, pos_state, below_state)
+            && physics::can_be_replaced(below_state, below_block, fluid)
+        {
             return distance;
         }
         if distance == reach {
@@ -154,7 +163,9 @@ pub fn get_in_flow_down_distance_iterative<T: FlowingFluid + Sync + ?Sized>(
 
             let next_state = world.get_block_state(&next_pos);
             let next_block = Block::from_state_id(next_state.id);
-            if !physics::can_be_replaced(next_state, next_block, fluid) {
+            if !physics::can_pass_through_wall(direction, pos_state, next_state)
+                || !physics::can_be_replaced(next_state, next_block, fluid)
+            {
                 continue;
             }
 

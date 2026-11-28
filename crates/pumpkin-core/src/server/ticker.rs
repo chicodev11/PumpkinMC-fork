@@ -47,6 +47,7 @@ pub struct Ticker;
 impl Ticker {
     /// Runs the main server tick loop on a dedicated thread.
     pub fn run(server: &Arc<Server>) {
+        raise_timer_resolution();
         // Single monotonic base, the schedule is plain nanosecond arithmetic.
         let base = Instant::now();
         let mut schedule = TickSchedule::new();
@@ -204,6 +205,7 @@ const fn apply_overload_skip(
 /// Vanilla drains its server-thread queue here (`pollTask`). there is no such queue:
 /// that work runs on the runtime and keeps going while this thread parks.
 fn wait_until_next_tick(server: &Server, base: Instant, next_tick_nanos: i64) {
+    const SPIN_NANOS: i64 = 1_500_000;
     loop {
         if server.stop_token.is_cancelled() {
             return;
@@ -214,9 +216,34 @@ fn wait_until_next_tick(server: &Server, base: Instant, next_tick_nanos: i64) {
             return;
         }
 
-        std::thread::park_timeout(Duration::from_nanos(remaining as u64));
+        // Park until shortly before the deadline, then yield: a park can wake late by a whole
+        // OS timer slice, which makes ticks (and so entity updates) uneven on the client.
+        if remaining > SPIN_NANOS {
+            std::thread::park_timeout(Duration::from_nanos((remaining - SPIN_NANOS) as u64));
+        } else {
+            std::thread::yield_now();
+        }
     }
 }
+
+/// Vanilla `Util.startTimerHackThread`: on Windows the JVM then holds a 1 ms system timer for the
+/// process. Without it sleeps wake on the default ~15.6 ms timer and ticks come out 47/62 ms apart.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn raise_timer_resolution() {
+    #[link(name = "winmm")]
+    unsafe extern "system" {
+        fn timeBeginPeriod(u_period: u32) -> u32;
+    }
+    // SAFETY: takes no pointers; only raises this process's timer resolution, which Windows
+    // restores when the process exits.
+    unsafe {
+        timeBeginPeriod(1);
+    }
+}
+
+#[cfg(not(windows))]
+const fn raise_timer_resolution() {}
 
 fn elapsed_nanos(base: Instant) -> i64 {
     base.elapsed().as_nanos() as i64

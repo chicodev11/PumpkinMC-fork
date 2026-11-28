@@ -20,13 +20,7 @@ impl JavaClient {
 
         let world = player.world();
         if let Some(target) = world.get_entity_by_id(target_id) {
-            let target_pos = target.get_entity().pos.load();
-            let target_yaw = target.get_entity().yaw.load();
-            let target_pitch = target.get_entity().pitch.load();
-            let target_id = target.get_entity().entity_id;
-
-            player.set_camera_entity_id(target_id);
-            player.request_teleport(target_pos, target_yaw, target_pitch);
+            player.set_camera_entity_id(target.get_entity().entity_id);
         }
     }
 }

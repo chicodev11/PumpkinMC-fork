@@ -334,7 +334,6 @@ pub struct VillagerEntity {
     pub offers: std::sync::Mutex<Vec<pumpkin_protocol::java::client::play::MerchantOffer>>,
     pub unhappy_counter: AtomicI32,
     pub trade_sound_cooldown: AtomicI32,
-    pub increase_profession_level_on_update: AtomicBool,
     pub last_traded_player: std::sync::Mutex<Option<Uuid>>,
     pub trading_player: std::sync::Mutex<Option<(Uuid, u8)>>,
     pub is_trading: AtomicBool,
@@ -409,7 +408,6 @@ impl VillagerEntity {
             offers: std::sync::Mutex::new(Vec::new()),
             unhappy_counter: AtomicI32::new(0),
             trade_sound_cooldown: AtomicI32::new(0),
-            increase_profession_level_on_update: AtomicBool::new(false),
             last_traded_player: std::sync::Mutex::new(None),
             trading_player: std::sync::Mutex::new(None),
             is_trading: AtomicBool::new(false),
@@ -880,8 +878,17 @@ impl VillagerEntity {
         if can_level_up(villager_data.level.0)
             && current_xp >= get_max_xp_per_level(villager_data.level.0)
         {
-            self.increase_profession_level_on_update
-                .store(true, Ordering::Relaxed);
+            // Vanilla 26.3 Villager.rewardTradeXp levels up in the same tick.
+            self.increase_merchant_career();
+            self.mob_entity.living_entity.add_effect(Effect {
+                effect_type: &StatusEffect::REGENERATION,
+                duration: 200,
+                amplifier: 0,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            });
             pop_xp += 5;
         }
 
@@ -1412,22 +1419,6 @@ impl VillagerEntity {
 
     fn villager_ai_step(&self) {
         let world = self.get_entity().world.load();
-
-        if self
-            .increase_profession_level_on_update
-            .swap(false, Ordering::Relaxed)
-        {
-            self.increase_merchant_career();
-            self.mob_entity.living_entity.add_effect(Effect {
-                effect_type: &StatusEffect::REGENERATION,
-                duration: 200,
-                amplifier: 0,
-                ambient: false,
-                show_particles: true,
-                show_icon: true,
-                blend: false,
-            });
-        }
 
         let last_traded_player = self
             .last_traded_player

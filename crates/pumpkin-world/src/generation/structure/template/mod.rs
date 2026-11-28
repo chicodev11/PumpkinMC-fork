@@ -61,6 +61,11 @@ pub trait BlockPlacer {
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId;
     fn set_block_state(&mut self, pos: &Vector3<i32>, state: &BlockState);
     fn add_block_entity(&mut self, nbt: NbtCompound);
+    /// Vanilla `LevelReader.getHeight` (first free Y), used by the gravity processor of
+    /// terrain-matching pieces. `None` skips gravity.
+    fn get_height(&self, _heightmap: processor::HeightmapType, _x: i32, _z: i32) -> Option<i32> {
+        None
+    }
 }
 
 /// Places a template at a world origin with an un-rotated XZ offset.
@@ -124,7 +129,7 @@ pub fn place_template_with_options(
         let local_pos = rotation.transform_pos(block.pos, template.size);
 
         let wx = world_x + local_pos.x;
-        let wy = origin.y + local_pos.y;
+        let mut wy = origin.y + local_pos.y;
         let wz = world_z + local_pos.z;
 
         if let Some(bbox) = chunk_box
@@ -174,14 +179,7 @@ pub fn place_template_with_options(
             continue;
         };
 
-        let world_pos = Vector3::new(wx, wy, wz);
-
-        if apply_waterlogging
-            && placer.get_block_state(&world_pos).to_block_id() == pumpkin_data::Block::WATER.id
-            && let Some(waterlogged_state) = state.set_waterlogged(true)
-        {
-            state = waterlogged_state;
-        }
+        let mut world_pos = Vector3::new(wx, wy, wz);
 
         // Apply processors
         let mut should_place = true;
@@ -189,6 +187,14 @@ pub fn place_template_with_options(
         let mut rng =
             LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
         for processor in processors {
+            // GravityProcessor: heightmap + offset + the block's unrotated template Y.
+            if let processor::StructureProcessor::Gravity { heightmap, offset } = processor {
+                if let Some(height) = placer.get_height(*heightmap, wx, wz) {
+                    wy = height + offset + block.pos.y;
+                    world_pos = Vector3::new(wx, wy, wz);
+                }
+                continue;
+            }
             let Some(processed_state) = processor.process_with_context(
                 placer,
                 world_pos,
@@ -206,12 +212,24 @@ pub fn place_template_with_options(
         if !should_place {
             continue;
         }
+        // StructureTemplate.placeInWorld re-checks the box and waterlogs at the processed position.
+        if let Some(bbox) = chunk_box
+            && (wy < bbox.min.y || wy > bbox.max.y)
+        {
+            continue;
+        }
+        if apply_waterlogging
+            && placer.get_block_state(&world_pos).to_block_id() == pumpkin_data::Block::WATER.id
+            && let Some(waterlogged_state) = state.set_waterlogged(true)
+        {
+            state = waterlogged_state;
+        }
         // Legacy pool elements ignore air after jigsaw replacement and custom processors.
         if skip_air && state.id.to_block_id() == pumpkin_data::Block::AIR.id {
             continue;
         }
 
-        placer.set_block_state(&Vector3::new(wx, wy, wz), state);
+        placer.set_block_state(&world_pos, state);
 
         // Create block entities for interactive blocks (furnaces, chests, etc.)
         let final_block = pumpkin_data::Block::from_id(state.id.to_block_id());

@@ -2,7 +2,11 @@
 use super::*;
 
 impl JavaClient {
-    pub fn handle_confirm_teleport(&self, player: &Player, confirm_teleport: &SConfirmTeleport) {
+    pub fn handle_confirm_teleport(
+        &self,
+        player: &Arc<Player>,
+        confirm_teleport: &SConfirmTeleport,
+    ) {
         let confirm_id = confirm_teleport.teleport_id;
         {
             let mut awaiting_teleport = player
@@ -13,6 +17,10 @@ impl JavaClient {
                 Some((id, position)) if id == confirm_id => {
                     player.get_entity().set_pos(position);
                     *awaiting_teleport = None;
+                    drop(awaiting_teleport);
+                    // Vanilla handleAcceptTeleportPacket -> handlePlayerPositionChange
+                    // moves the chunk view even when the client then stands still.
+                    crate::world::chunker::update_position(player);
                     return;
                 }
                 Some(_) => return,
