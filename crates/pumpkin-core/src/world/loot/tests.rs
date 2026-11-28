@@ -467,7 +467,8 @@ fn binomial_stem_count_is_not_a_uniform_range() {
         ..Default::default()
     };
     let mut total = 0u32;
-    for seed in 0..2048 {
+    // Seed 0 means "pick a random seed" (vanilla), so the two rolls would differ
+    for seed in 1..2048 {
         let drops = table.generate_loot_with_context(seed, &params);
         let loaded = generate_dynamic_loot_with_context(&dynamic, seed, &params);
         let count: u32 = drops.iter().map(|stack| u32::from(stack.item_count)).sum();

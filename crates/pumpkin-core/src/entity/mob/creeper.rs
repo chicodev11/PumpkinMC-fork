@@ -330,8 +330,26 @@ impl Mob for CreeperEntity {
             rand::random::<f32>() * 0.4 + 0.8,
         );
 
-        self.ignited.store(true, Ordering::Relaxed);
-        entity.set_synced_data(pumpkin_data::tracked_data::creeper::IS_IGNITED, true);
+        // Paper `CreeperIgniteEvent` (`Creeper.ignite`)
+        let ignited = match world
+            .get_entity_by_id(entity.entity_id)
+            .and_then(|creeper| {
+                world.plugin_event(|| {
+                    crate::plugin::api::events::entity::creeper_ignite::CreeperIgniteEvent {
+                        creeper,
+                        ignited: true,
+                        cancelled: false,
+                    }
+                })
+            }) {
+            Some(event) if event.cancelled => None,
+            Some(event) => Some(event.ignited),
+            None => Some(true),
+        };
+        if let Some(ignited) = ignited {
+            self.ignited.store(ignited, Ordering::Relaxed);
+            entity.set_synced_data(pumpkin_data::tracked_data::creeper::IS_IGNITED, ignited);
+        }
 
         if player.gamemode.load() != pumpkin_util::GameMode::Creative {
             let _ = item_stack.damage_item(1);

@@ -61,10 +61,17 @@ impl ItemBehaviour for EggItem {
         egg.set_item_stack(stack.copy_with_count(1));
 
         egg.thrown.set_velocity_from(pitch, yaw, 0.0, POWER, 1.0);
-        world.spawn_entity(Arc::new(egg));
+        let projectile: Arc<dyn crate::entity::EntityBase> = Arc::new(egg);
+        // Paper `PlayerLaunchProjectileEvent`
+        let Some(consume) = player.launch_projectile_event(&stack, &projectile) else {
+            return;
+        };
+        world.spawn_entity(projectile);
 
         let item_id = stack.item.id;
-        stack.decrement_unless_creative(player.gamemode.load(), 1);
+        if consume {
+            stack.decrement_unless_creative(player.gamemode.load(), 1);
+        }
         match hand {
             pumpkin_util::Hand::Right => player.inventory.set_held_item(stack),
             pumpkin_util::Hand::Left => player

@@ -688,6 +688,152 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
             cleanup_player(state, &data.player);
             cleanup_entity(state, &data.entity);
         }
+        Event::PlayerItemGroupCooldownEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerItemCooldownEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerLaunchProjectileEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+            cleanup_entity(state, &data.projectile);
+        }
+        Event::PlayerStartSpectatingEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.current_spectator_target);
+            cleanup_entity(state, &data.new_spectator_target);
+        }
+        Event::PlayerStopSpectatingEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.spectator_target);
+        }
+        Event::PlayerAttackEntityCooldownResetEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.attacked);
+        }
+        Event::PlayerArmorChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.old_item);
+            cleanup_item_stack(state, &data.new_item);
+        }
+        Event::PlayerDeepSleepEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerShieldDisableEvent(data) => {
+            cleanup_player(state, &data.player);
+            if let Some(e) = &data.damager {
+                cleanup_entity(state, e);
+            }
+        }
+        Event::PlayerArmSwingEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::ClientTickEndEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerClientOptionsChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerSwapWithEquipmentSlotEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::PlayerMapFilledEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.original_item);
+            cleanup_item_stack(state, &data.created_map);
+        }
+        Event::PlayerFlowerPotManipulateEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::PlayerConnectionCloseEvent(_) => {}
+        Event::PlayerItemFrameChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.item_frame);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::PlayerReadyArrowEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.bow);
+            cleanup_item_stack(state, &data.arrow);
+        }
+        Event::AnvilDamagedEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::CreeperIgniteEvent(data) => {
+            cleanup_entity(state, &data.creeper);
+        }
+        Event::PufferFishStateChangeEvent(data) => {
+            cleanup_entity(state, &data.pufferfish);
+        }
+        Event::EndermanAttackPlayerEvent(data) => {
+            cleanup_entity(state, &data.enderman);
+            cleanup_player(state, &data.player);
+        }
+        Event::ThrownEggHatchEvent(data) => {
+            cleanup_entity(state, &data.egg);
+        }
+        Event::ElderGuardianAppearanceEvent(data) => {
+            cleanup_entity(state, &data.guardian);
+            cleanup_player(state, &data.affected_player);
+        }
+        Event::EntityJumpEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::ExperienceOrbMergeEvent(data) => {
+            cleanup_entity(state, &data.merge_target);
+            cleanup_entity(state, &data.merge_source);
+        }
+        Event::EntityPathfindEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            if let Some(e) = &data.target_entity {
+                cleanup_entity(state, e);
+            }
+        }
+        Event::EntityInsideBlockEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::SkeletonHorseTrapEvent(data) => {
+            cleanup_entity(state, &data.horse);
+            for e in &data.eligible_players {
+                cleanup_entity(state, e);
+            }
+        }
+        Event::EntityLoadCrossbowEvent(data) => {
+            cleanup_player(state, &data.entity);
+            cleanup_item_stack(state, &data.crossbow);
+        }
+        Event::BeaconEffectEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::BeaconActivatedEvent(_) => {}
+        Event::BeaconDeactivatedEvent(_) => {}
+        Event::TargetHitEvent(data) => {
+            cleanup_entity(state, &data.projectile);
+        }
+        Event::BlockPreDispenseEvent(data) => {
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::BlockFailedDispenseEvent(_) => {}
+        Event::VaultChangeStateEvent(_) => {}
+        Event::BlockBreakProgressUpdateEvent(data) => {
+            if let Some(e) = &data.entity {
+                cleanup_entity(state, e);
+            }
+        }
+        Event::DragonEggFormEvent(_) => {}
+        Event::BellRevealRaiderEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::WorldDifficultyChangeEvent(data) => {
+            cleanup_world(state, &data.event_world);
+        }
+        Event::WorldGameRuleChangeEvent(data) => {
+            cleanup_world(state, &data.event_world);
+        }
+        Event::ServerResourcesReloadedEvent(_) => {}
         Event::EntityAddToWorldEvent(data) => {
             cleanup_entity(state, &data.entity);
             cleanup_world(state, &data.entity_world);

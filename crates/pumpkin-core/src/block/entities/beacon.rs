@@ -162,6 +162,38 @@ impl BeaconBlockEntity {
         current_level
     }
 
+    /// Paper `BeaconEffectEvent`: `None` when a plugin cancelled the effect for this player.
+    fn beacon_effect_event(
+        &self,
+        player: &Arc<crate::entity::player::Player>,
+        effect: pumpkin_data::potion::Effect,
+        is_primary: bool,
+    ) -> Option<pumpkin_data::potion::Effect> {
+        let Some(event) = player.plugin_event(|player| {
+            crate::plugin::api::events::block::beacon_effect::BeaconEffectEvent {
+                block: self.position,
+                player,
+                effect_type: effect.effect_type.minecraft_name.to_string(),
+                amplifier: i32::from(effect.amplifier),
+                duration: effect.duration,
+                is_primary,
+                cancelled: false,
+            }
+        }) else {
+            return Some(effect);
+        };
+        if event.cancelled {
+            return None;
+        }
+        Some(pumpkin_data::potion::Effect {
+            effect_type: StatusEffect::from_minecraft_name(&event.effect_type)
+                .unwrap_or(effect.effect_type),
+            amplifier: u8::try_from(event.amplifier.clamp(0, 255)).unwrap_or(u8::MAX),
+            duration: event.duration,
+            ..effect
+        })
+    }
+
     pub fn apply_effects(&self, world: &Arc<World>, levels: i32) {
         let primary_id = self.primary_effect.load(Ordering::Relaxed);
         let secondary_id = self.secondary_effect.load(Ordering::Relaxed);
@@ -203,31 +235,54 @@ impl BeaconBlockEntity {
                 },
             );
 
-            if let Some(effect) = primary_effect {
-                player.add_effect(pumpkin_data::potion::Effect {
-                    effect_type: effect,
-                    duration: duration_ticks,
-                    amplifier: base_amp as u8,
-                    ambient: true,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                });
+            if let Some(effect) = primary_effect
+                && let Some(effect) = self.beacon_effect_event(
+                    player,
+                    pumpkin_data::potion::Effect {
+                        effect_type: effect,
+
+                        duration: duration_ticks,
+
+                        amplifier: base_amp as u8,
+
+                        ambient: true,
+
+                        show_particles: true,
+
+                        show_icon: true,
+
+                        blend: false,
+                    },
+                    true,
+                )
+            {
+                player.add_effect(effect);
             }
 
             if levels >= 4
                 && primary_id != secondary_id
                 && let Some(effect) = secondary_effect
+                && let Some(effect) = self.beacon_effect_event(
+                    player,
+                    pumpkin_data::potion::Effect {
+                        effect_type: effect,
+
+                        duration: duration_ticks,
+
+                        amplifier: 0,
+
+                        ambient: true,
+
+                        show_particles: true,
+
+                        show_icon: true,
+
+                        blend: false,
+                    },
+                    false,
+                )
             {
-                player.add_effect(pumpkin_data::potion::Effect {
-                    effect_type: effect,
-                    duration: duration_ticks,
-                    amplifier: 0,
-                    ambient: true,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                });
+                player.add_effect(effect);
             }
         }
     }
@@ -345,7 +400,22 @@ impl BlockEntity for BeaconBlockEntity {
         // Check properties every 80 ticks matching Java
         if world.get_time_of_day() % 80 == 0 {
             let levels = self.update_base(world);
-            self.levels.store(levels, Ordering::Relaxed);
+            let old_levels = self.levels.swap(levels, Ordering::Relaxed);
+            // Paper `BeaconActivatedEvent` / `BeaconDeactivatedEvent`
+            if old_levels <= 0 && levels > 0 {
+                world.plugin_event(|| {
+                    crate::plugin::api::events::block::beacon_activated::BeaconActivatedEvent {
+                        block: self.position,
+                        levels,
+                    }
+                });
+            } else if old_levels > 0 && levels <= 0 {
+                world.plugin_event(|| {
+                    crate::plugin::api::events::block::beacon_deactivated::BeaconDeactivatedEvent {
+                        block: self.position,
+                    }
+                });
+            }
 
             if levels > 0 {
                 self.apply_effects(world, levels);

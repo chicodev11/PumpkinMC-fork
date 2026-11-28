@@ -616,6 +616,8 @@ pub struct Player {
     pub last_death_location: std::sync::Mutex<Option<(ResourceLocation, BlockPos)>>,
     /// The player's sleep status
     pub sleeping_since: AtomicCell<Option<u8>>,
+    /// Set when a plugin cancels a thrown item's launch, so the item use counts as failed.
+    pub item_use_failed: AtomicBool,
     /// Head position of the bed the player is currently sleeping in.
     pub sleeping_bed_pos: AtomicCell<Option<BlockPos>>,
     /// Whether the player is ignored when calculating the percentage of sleeping players needed to skip the night.
@@ -1025,6 +1027,7 @@ impl Player {
             respawn_point: std::sync::Mutex::new(None),
             last_death_location: std::sync::Mutex::new(None),
             sleeping_since: AtomicCell::new(None),
+            item_use_failed: AtomicBool::new(false),
             sleeping_bed_pos: AtomicCell::new(None),
             sleeping_ignored: AtomicBool::new(false),
             // We want this to be an impossible watched section so that `chunker::update_position`
@@ -1205,7 +1208,105 @@ impl Player {
         self.try_send_client_packet(&CTabList::new(header, footer));
     }
 
+    /// Fires a plugin event built from this player's `Arc`, blocking until the handlers ran.
+    /// Free when nothing listens; `None` then.
+    pub fn plugin_event<E: crate::plugin::api::events::Payload + 'static>(
+        &self,
+        event: impl FnOnce(Arc<Self>) -> E,
+    ) -> Option<E> {
+        let world = self.world();
+        let server = world.server.upgrade()?;
+        if !server.plugin_manager.has_handlers::<E>() {
+            return None;
+        }
+        let player = world.get_player_by_uuid(self.gameprofile.id)?;
+        let mut event = event(player);
+        server.plugin_manager.fire_blocking(&server, &mut event);
+        Some(event)
+    }
+
+    /// Paper's Bukkit `EquipmentSlot` name for a slot.
+    #[must_use]
+    pub const fn equipment_slot_name(slot: &EquipmentSlot) -> &'static str {
+        match slot {
+            EquipmentSlot::MainHand(_) => "HAND",
+            EquipmentSlot::OffHand(_) => "OFF_HAND",
+            EquipmentSlot::Feet(_) => "FEET",
+            EquipmentSlot::Legs(_) => "LEGS",
+            EquipmentSlot::Chest(_) => "CHEST",
+            EquipmentSlot::Head(_) => "HEAD",
+            EquipmentSlot::Body(_) => "BODY",
+            EquipmentSlot::Saddle(_) => "SADDLE",
+        }
+    }
+
+    /// Paper `PlayerItemGroupCooldownEvent`, then the cooldown (`ItemCooldowns.addCooldown(id)`).
     pub fn start_cooldown(&self, group: String, duration: i32) {
+        let duration = match self.plugin_event(|player| {
+            crate::plugin::api::events::player::player_item_group_cooldown::PlayerItemGroupCooldownEvent {
+                player,
+                cooldown_group: namespaced(&group),
+                cooldown: duration,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return,
+            Some(event) => event.cooldown.max(0),
+            None => duration,
+        };
+        self.apply_cooldown(group, duration);
+    }
+
+    /// Paper `PlayerItemCooldownEvent`, then the cooldown (`ItemCooldowns.addCooldown(stack)`).
+    pub fn start_item_cooldown(&self, stack: &ItemStack, group: String, duration: i32) {
+        let duration = match self.plugin_event(|player| {
+            crate::plugin::api::events::player::player_item_cooldown::PlayerItemCooldownEvent {
+                player,
+                item_type: format!("minecraft:{}", stack.item.registry_key),
+                cooldown_group: namespaced(&group),
+                cooldown: duration,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return,
+            Some(event) => event.cooldown.max(0),
+            None => duration,
+        };
+        self.apply_cooldown(group, duration);
+    }
+
+    /// Paper `PlayerLaunchProjectileEvent` for a thrown item. `None` when a plugin cancelled
+    /// the throw (the item use then fails, so no use cooldown starts); otherwise whether the item
+    /// is used up.
+    pub fn launch_projectile_event(
+        &self,
+        stack: &ItemStack,
+        projectile: &Arc<dyn EntityBase>,
+    ) -> Option<bool> {
+        let Some(event) = self.plugin_event(|player| {
+            crate::plugin::api::events::player::player_launch_projectile::PlayerLaunchProjectileEvent {
+                player,
+                item: stack.clone(),
+                projectile: projectile.clone(),
+                should_consume: true,
+                cancelled: false,
+            }
+        }) else {
+            return Some(true);
+        };
+        if event.cancelled {
+            self.item_use_failed.store(true, Ordering::Relaxed);
+            self.sync_inventory_to_client();
+            return None;
+        }
+        if !event.should_consume {
+            // The client already took the item out of its own copy
+            self.sync_inventory_to_client();
+        }
+        Some(event.should_consume)
+    }
+
+    fn apply_cooldown(&self, group: String, duration: i32) {
         let mut cooldowns = self
             .item_cooldowns
             .lock()
@@ -1734,7 +1835,20 @@ impl Player {
         } else {
             self.get_attack_cooldown_progress(f64::from(server.basic_config.tps), 0.5, attack_speed)
         };
-        self.last_attacked_ticks.store(0, Ordering::Relaxed);
+        // Paper `PlayerAttackEntityCooldownResetEvent`: a cancelled one keeps the charge.
+        if !self
+            .plugin_event(|player| {
+                crate::plugin::api::events::player::player_attack_entity_cooldown_reset::PlayerAttackEntityCooldownResetEvent {
+                    player,
+                    attacked: victim.clone(),
+                    cooldown: attack_cooldown_progress as f32,
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+        {
+            self.last_attacked_ticks.store(0, Ordering::Relaxed);
+        }
 
         if self.deflect_projectile(victim.as_ref()) {
             return;
@@ -2021,6 +2135,17 @@ impl Player {
     /// sound when it goes into its own slot, and `equip`/`unequip` game events for armor.
     /// Nothing happens for spectators, on the first tick or when the item did not change.
     pub fn on_equip_item(&self, slot: &EquipmentSlot, old: &ItemStack, new: &ItemStack) {
+        // Paper `PlayerArmorChangeEvent`: any change in an armor slot
+        if slot.is_armor_slot() && !old.are_equal(new) {
+            self.plugin_event(|player| {
+                crate::plugin::api::events::player::player_armor_change::PlayerArmorChangeEvent {
+                    player,
+                    slot: Self::equipment_slot_name(slot).to_string(),
+                    old_item: old.clone(),
+                    new_item: new.clone(),
+                }
+            });
+        }
         let entity = self.get_entity();
         if self.is_spectator()
             || old.are_items_and_components_equal(new)
@@ -3514,9 +3639,25 @@ impl Player {
             .fetch_add(1, Ordering::Relaxed);
         if let Some(sleeping_since) = self.sleeping_since.load() {
             if self.is_sleeping() {
-                self.sleeping_since.store(Some(
-                    sleeping_since.saturating_add(1).min(Self::FULL_SLEEP_TICKS),
-                ));
+                let next = sleeping_since.saturating_add(1).min(Self::FULL_SLEEP_TICKS);
+                // Paper `PlayerDeepSleepEvent`: cancelling restarts the count, so the player is
+                // not deep asleep yet (Paper sets it far below zero instead).
+                let next = if next == Self::FULL_SLEEP_TICKS
+                    && sleeping_since < Self::FULL_SLEEP_TICKS
+                    && self
+                        .plugin_event(|player| {
+                            crate::plugin::api::events::player::player_deep_sleep::PlayerDeepSleepEvent {
+                                player,
+                                cancelled: false,
+                            }
+                        })
+                        .is_some_and(|event| event.cancelled)
+                {
+                    0
+                } else {
+                    next
+                };
+                self.sleeping_since.store(Some(next));
             } else if sleeping_since > 0
                 && sleeping_since.saturating_add(1) < Self::SLEEP_TIMER_RESET_TICKS
             {
@@ -4226,6 +4367,9 @@ impl Player {
     /// Sets the player's camera target entity ID.
     /// If `target_id` matches the player's own entity ID, resets the camera back to the player.
     pub fn set_camera_entity_id(&self, target_id: i32) {
+        if self.camera_change_cancelled(target_id) {
+            return;
+        }
         if target_id == self.entity_id() {
             self.camera_target_id.store(None);
             self.try_send_client_packet(&CSetCamera::new(self.entity_id().into()));
@@ -4233,6 +4377,44 @@ impl Player {
             self.camera_target_id.store(Some(target_id));
             self.try_send_client_packet(&CSetCamera::new(target_id.into()));
         }
+    }
+
+    /// Paper `PlayerStartSpectatingEntityEvent` / `PlayerStopSpectatingEntityEvent`
+    /// (`ServerPlayer.setCamera`); `true` when a plugin cancelled the change.
+    fn camera_change_cancelled(&self, target_id: i32) -> bool {
+        let current = self.camera_target_id.load();
+        let world = self.world();
+        if target_id == self.entity_id() {
+            let Some(current) = current else {
+                return false;
+            };
+            return self
+                .plugin_event(|player| {
+                    crate::plugin::api::events::player::player_stop_spectating_entity::PlayerStopSpectatingEntityEvent {
+                        spectator_target: world
+                            .get_entity_by_id(current)
+                            .unwrap_or_else(|| player.clone()),
+                        player,
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled);
+        }
+        if current == Some(target_id) {
+            return false;
+        }
+        self.plugin_event(|player| {
+            let me: Arc<dyn EntityBase> = player.clone();
+            crate::plugin::api::events::player::player_start_spectating_entity::PlayerStartSpectatingEntityEvent {
+                current_spectator_target: current
+                    .and_then(|id| world.get_entity_by_id(id))
+                    .unwrap_or_else(|| me.clone()),
+                new_spectator_target: world.get_entity_by_id(target_id).unwrap_or(me),
+                player,
+                cancelled: false,
+            }
+        })
+        .is_some_and(|event| event.cancelled)
     }
 
     /// Resets the player's camera back to their own perspective.
@@ -8068,6 +8250,7 @@ impl Player {
         let stack = inventory.get_slot(PlayerInventory::OFF_HAND_SLOT);
         if crate::item::items::projectile_weapon::ProjectileWeaponItem::is_arrow(stack.item)
             && stack.item_count > 0
+            && self.ready_arrow_allowed(&stack)
         {
             return Some(PlayerInventory::OFF_HAND_SLOT);
         }
@@ -8077,12 +8260,36 @@ impl Player {
             let stack = inventory.get_slot(slot);
             if crate::item::items::projectile_weapon::ProjectileWeaponItem::is_arrow(stack.item)
                 && stack.item_count > 0
+                && self.ready_arrow_allowed(&stack)
             {
                 return Some(slot);
             }
         }
 
         None
+    }
+
+    /// Paper `PlayerReadyArrowEvent`: `false` when a plugin skips this arrow, so the next
+    /// one is tried.
+    fn ready_arrow_allowed(&self, arrow: &ItemStack) -> bool {
+        !self
+            .plugin_event(|player| {
+                let main = player.inventory.held_item();
+                let bow = if crate::item::items::projectile_weapon::ProjectileWeaponItem::is_arrow_or_firework(main.item)
+                    || main.is_empty()
+                {
+                    player.inventory.off_hand_item()
+                } else {
+                    main
+                };
+                crate::plugin::api::events::player::player_ready_arrow::PlayerReadyArrowEvent {
+                    player,
+                    bow,
+                    arrow: arrow.clone(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
     }
 
     /// Find crossbow projectile in inventory (offhand/mainhand arrow or firework rocket, then inventory arrows)
@@ -8093,6 +8300,7 @@ impl Player {
         if crate::item::items::projectile_weapon::ProjectileWeaponItem::is_arrow_or_firework(
             off_hand.item,
         ) && off_hand.item_count > 0
+            && self.ready_arrow_allowed(&off_hand)
         {
             return Some(PlayerInventory::OFF_HAND_SLOT);
         }
@@ -8102,6 +8310,7 @@ impl Player {
         if crate::item::items::projectile_weapon::ProjectileWeaponItem::is_arrow_or_firework(
             main_hand.item,
         ) && main_hand.item_count > 0
+            && self.ready_arrow_allowed(&main_hand)
         {
             return Some(selected);
         }
@@ -9978,10 +10187,11 @@ impl InventoryPlayer for Player {
             let state = world.get_block_state(&pos);
             let block = pumpkin_data::Block::from_state_id(state.id);
             if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_ANVIL) {
-                if !self.has_infinite_materials() && rand::random::<f32>() < 0.12 {
-                    if let Some(new_state) =
-                        crate::block::blocks::anvil::AnvilBlock::damage(state.id)
-                    {
+                if !self.has_infinite_materials()
+                    && rand::random::<f32>() < 0.12
+                    && let Some(next) = self.anvil_damage_event(pos, state.id)
+                {
+                    if let Some(new_state) = next {
                         world.set_block_state(
                             &pos,
                             new_state,
@@ -10366,5 +10576,45 @@ pub fn bedrock_dimension_id(world: &World) -> i32 {
         "minecraft:the_nether" => 1,
         "minecraft:the_end" => 2,
         _ => 0,
+    }
+}
+
+/// A resource location with the `minecraft` namespace filled in.
+fn namespaced(id: &str) -> String {
+    if id.contains(':') {
+        id.to_string()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
+impl Player {
+    /// Paper `AnvilDamagedEvent`: `None` when a plugin cancelled the damage, otherwise the
+    /// new anvil state (`None` inside when it breaks).
+    #[allow(
+        clippy::option_option,
+        reason = "outer None = cancelled, inner None = anvil breaks"
+    )]
+    fn anvil_damage_event(
+        &self,
+        pos: BlockPos,
+        state_id: pumpkin_data::BlockStateId,
+    ) -> Option<Option<pumpkin_data::BlockStateId>> {
+        use crate::block::blocks::anvil::AnvilBlock;
+        let next = AnvilBlock::damage(state_id);
+        let Some(event) = self.plugin_event(|player| {
+            crate::plugin::api::events::block::anvil_damaged::AnvilDamagedEvent {
+                player,
+                block: pos,
+                damage_state: AnvilBlock::damage_state_name(next).to_string(),
+                cancelled: false,
+            }
+        }) else {
+            return Some(next);
+        };
+        if event.cancelled {
+            return None;
+        }
+        Some(AnvilBlock::with_damage_state(state_id, &event.damage_state))
     }
 }

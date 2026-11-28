@@ -3135,6 +3135,24 @@ impl Entity {
                 if !collides || !visited.insert(pos) {
                     return true;
                 }
+                // Paper `EntityInsideBlockEvent`
+                if let Some(entity) = server
+                    .plugin_manager
+                    .has_handlers::<crate::plugin::api::events::entity::entity_inside_block::EntityInsideBlockEvent>()
+                    .then(|| world.get_entity_by_id(self.entity_id))
+                    .flatten()
+                {
+                    let mut event =
+                        crate::plugin::api::events::entity::entity_inside_block::EntityInsideBlockEvent {
+                            entity,
+                            block: pos,
+                            cancelled: false,
+                        };
+                    server.plugin_manager.fire_blocking(&server, &mut event);
+                    if event.cancelled {
+                        return true;
+                    }
+                }
                 if block == &Block::POWDER_SNOW {
                     self.is_in_powder_snow.store(true, Relaxed);
                 }

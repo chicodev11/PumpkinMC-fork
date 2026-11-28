@@ -50,8 +50,8 @@ use pumpkin_inventory::screen_handler::{InventoryPlayer, ScreenHandler};
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::{
-    CBlockUpdate, CCommandSuggestions, CPingResponse, CPlayerInfoUpdate, CSetCamera,
-    CSetSelectedSlot, InitChat, PlayerAction, PlayerInfoFlags,
+    CBlockUpdate, CCommandSuggestions, CPingResponse, CPlayerInfoUpdate, CSetSelectedSlot,
+    InitChat, PlayerAction, PlayerInfoFlags,
 };
 use pumpkin_protocol::java::server::play::{
     Action, ActionType, CommandBlockMode, FLAG_HORIZONTAL_COLLISION, FLAG_ON_GROUND, SAttack,

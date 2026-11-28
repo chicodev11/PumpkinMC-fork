@@ -504,11 +504,22 @@ impl DragonFight {
         if !self.previously_killed {
             let podium_pos = self.exit_portal_location.unwrap_or(self.origin);
             let egg_pos = BlockPos::new(podium_pos.0.x, podium_pos.0.y + 4, podium_pos.0.z);
-            world.set_block_state(
-                &egg_pos,
-                Block::DRAGON_EGG.default_state.id,
-                BlockFlags::NOTIFY_LISTENERS,
-            );
+            // Paper `DragonEggFormEvent`
+            if !world
+                .plugin_event(|| {
+                    crate::plugin::api::events::block::dragon_egg_form::DragonEggFormEvent {
+                        block: egg_pos,
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                world.set_block_state(
+                    &egg_pos,
+                    Block::DRAGON_EGG.default_state.id,
+                    BlockFlags::NOTIFY_LISTENERS,
+                );
+            }
         }
 
         self.previously_killed = true;

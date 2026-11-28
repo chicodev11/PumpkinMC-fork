@@ -91,9 +91,38 @@ pub mod tnt_prime;
 /// Vault display item event.
 pub mod vault_display_item;
 
+/// Anvil Damaged event.
+pub mod anvil_damaged;
+/// Beacon Activated event.
+pub mod beacon_activated;
+/// Beacon Deactivated event.
+pub mod beacon_deactivated;
+/// Beacon Effect event.
+pub mod beacon_effect;
+/// Bell Reveal Raider event.
+pub mod bell_reveal_raider;
+/// Block Break Progress Update event.
+pub mod block_break_progress_update;
+/// Block Failed Dispense event.
+pub mod block_failed_dispense;
+/// Block Pre Dispense event.
+pub mod block_pre_dispense;
+/// Dragon Egg Form event.
+pub mod dragon_egg_form;
+/// Target Hit event.
+pub mod target_hit;
+/// Vault Change State event.
+pub mod vault_change_state;
+
+pub use anvil_damaged::*;
+pub use beacon_activated::*;
+pub use beacon_deactivated::*;
+pub use beacon_effect::*;
 pub use bell_resonate::*;
+pub use bell_reveal_raider::*;
 pub use bell_ring::*;
 pub use block_break::*;
+pub use block_break_progress_update::*;
 pub use block_brush::*;
 pub use block_burn::*;
 pub use block_can_build::*;
@@ -107,6 +136,7 @@ pub use block_drop_item::*;
 pub use block_exp::*;
 pub use block_explode::*;
 pub use block_fade::*;
+pub use block_failed_dispense::*;
 pub use block_fertilize::*;
 pub use block_form::*;
 pub use block_from_to::*;
@@ -116,6 +146,7 @@ pub use block_multi_place::*;
 pub use block_physics::*;
 pub use block_piston::*;
 pub use block_place::*;
+pub use block_pre_dispense::*;
 pub use block_receive_game::*;
 pub use block_redstone::*;
 pub use block_shear_entity::*;
@@ -124,6 +155,7 @@ pub use brewing_start::*;
 pub use campfire_start::*;
 pub use cauldron_level_change::*;
 pub use crafter_craft::*;
+pub use dragon_egg_form::*;
 pub use entity_block_form::*;
 pub use fluid_level_change::*;
 pub use inventory_block_start::*;
@@ -135,5 +167,7 @@ pub use player_pick_entity::*;
 pub use sculk_bloom::*;
 pub use sign_change::*;
 pub use sponge_absorb::*;
+pub use target_hit::*;
 pub use tnt_prime::*;
+pub use vault_change_state::*;
 pub use vault_display_item::*;

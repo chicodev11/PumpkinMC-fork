@@ -63,19 +63,6 @@ impl TridentItem {
     ) {
         let world = player.world();
         let thrown_stack = stack.copy_with_count(1);
-        if !is_creative {
-            stack.decrement(1);
-            let remaining_stack = if stack.is_empty() {
-                ItemStack::EMPTY.clone()
-            } else {
-                stack
-            };
-            player
-                .inventory()
-                .set_slot(slot_index, remaining_stack.clone());
-            player.sync_hand_slot(slot_index, remaining_stack);
-        }
-
         let (yaw, pitch) = player.rotation();
         let entity = Entity::new(world.clone(), player.position(), &EntityType::TRIDENT);
         let pickup = if is_creative {
@@ -95,6 +82,23 @@ impl TridentItem {
         );
         let trident_pos = trident.get_entity().pos.load();
         let trident_arc = Arc::new(trident);
+        // Paper `PlayerLaunchProjectileEvent`, before the trident leaves the inventory
+        let projectile: Arc<dyn EntityBase> = trident_arc.clone();
+        let Some(consume) = player.launch_projectile_event(&stack, &projectile) else {
+            return;
+        };
+        if !is_creative && consume {
+            stack.decrement(1);
+            let remaining_stack = if stack.is_empty() {
+                ItemStack::EMPTY.clone()
+            } else {
+                stack
+            };
+            player
+                .inventory()
+                .set_slot(slot_index, remaining_stack.clone());
+            player.sync_hand_slot(slot_index, remaining_stack);
+        }
         world.spawn_entity(trident_arc.clone());
         trident_arc.apply_on_projectile_spawned(&thrown_stack);
 

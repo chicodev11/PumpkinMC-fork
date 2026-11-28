@@ -39,6 +39,11 @@ pub mod world_load;
 #[doc = "World save event."]
 pub mod world_save;
 
+/// World Difficulty Change event.
+pub mod world_difficulty_change;
+/// World Game Rule Change event.
+pub mod world_game_rule_change;
+
 pub use async_structure_generate::*;
 pub use async_structure_spawn::*;
 pub use chunk_load::*;
@@ -55,6 +60,8 @@ pub use portal_create::*;
 pub use structure_grow::*;
 pub use time_skip::*;
 pub use weather_change::*;
+pub use world_difficulty_change::*;
+pub use world_game_rule_change::*;
 pub use world_init::*;
 pub use world_load::*;
 pub use world_save::*;

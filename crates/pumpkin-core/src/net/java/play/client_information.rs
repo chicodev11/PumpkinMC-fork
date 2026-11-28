@@ -12,6 +12,20 @@ impl JavaClient {
             Hand::try_from(client_information.main_hand.0),
             ChatMode::try_from(client_information.chat_mode.0),
         ) {
+            // Paper `PlayerClientOptionsChangeEvent`, before the options are applied
+            player.plugin_event(|player| {
+                crate::plugin::api::events::player::player_client_options_change::PlayerClientOptionsChangeEvent {
+                    player,
+                    locale: client_information.locale.to_string(),
+                    view_distance: client_information.view_distance.into(),
+                    chat_visibility: format!("{chat_mode:?}"),
+                    chat_colors: client_information.chat_colors,
+                    skin_parts: client_information.skin_parts.into(),
+                    main_hand: if main_hand == Hand::Left { "LEFT" } else { "RIGHT" }.to_string(),
+                    text_filtering: client_information.text_filtering,
+                    allow_server_listings: client_information.server_listing,
+                }
+            });
             let (update_settings, update_watched, main_hand_changed, locale_changed) = {
                 // 1. Load current snapshot
                 let current_config = player.config.load();

@@ -1101,6 +1101,30 @@ impl World {
     }
 
     pub fn set_game_rule(&self, rule: &GameRule, value: GameRuleValue<i64, bool>) {
+        // Paper `WorldGameRuleChangeEvent`: plugins may cancel or change the value
+        let value = if let Some(world) = self.self_arc() {
+            let current = match &value {
+                GameRuleValue::Int(v) => v.to_string(),
+                GameRuleValue::Bool(v) => v.to_string(),
+            };
+            match self.plugin_event(|| crate::plugin::api::events::world::world_game_rule_change::WorldGameRuleChangeEvent {
+                world,
+                game_rule: rule.to_string(),
+                value: current,
+                cancelled: false,
+            }) {
+                Some(event) if event.cancelled => return,
+                Some(event) => match &value {
+                    GameRuleValue::Int(v) => GameRuleValue::Int(event.value.parse().unwrap_or(*v)),
+                    GameRuleValue::Bool(v) => {
+                        GameRuleValue::Bool(event.value.parse().unwrap_or(*v))
+                    }
+                },
+                None => value,
+            }
+        } else {
+            value
+        };
         let bool_value = match &value {
             GameRuleValue::Bool(value) => Some(*value),
             GameRuleValue::Int(_) => None,
@@ -5890,6 +5914,17 @@ impl World {
         self.fire_entity_add_to_world(&entity);
     }
 
+    /// This world's own `Arc`, looked up through the server.
+    fn self_arc(&self) -> Option<Arc<Self>> {
+        let server = self.server.upgrade()?;
+        server
+            .worlds
+            .load()
+            .iter()
+            .find(|world| std::ptr::eq(world.as_ref(), self))
+            .cloned()
+    }
+
     /// Paper `EntityAddToWorldEvent`, once the entity is in the world's lists.
     fn fire_entity_add_to_world(&self, entity: &Arc<dyn EntityBase>) {
         self.plugin_event(|| {
@@ -6236,6 +6271,19 @@ impl World {
         progress: BlockBreakingProgress,
     ) {
         let chunk_pos = location.chunk_position(); // pumpkin's BlockPos already has this method
+        // Paper `BlockBreakProgressUpdateEvent`
+        if let BlockBreakingProgress::Start { stage, .. }
+        | BlockBreakingProgress::Update { stage, .. } = &progress
+        {
+            let stage = *stage;
+            self.plugin_event(|| {
+                crate::plugin::api::events::block::block_break_progress_update::BlockBreakProgressUpdateEvent {
+                    block: location,
+                    progress: (stage as f32 / 9.0).clamp(0.0, 1.0),
+                    entity: self.get_entity_by_id(from.entity_id),
+                }
+            });
+        }
         let (stage, bedrock_event) = match progress {
             BlockBreakingProgress::Start { stage, speed } => (
                 stage,

@@ -354,7 +354,25 @@ impl EndermanEntity {
         self.carried_block.load()
     }
 
+    /// Vanilla `isBeingStaredBy`, then Paper `EndermanAttackPlayerEvent` (plugins may change
+    /// whether the stare counts).
     pub fn is_player_staring(&self, player: &Player) -> bool {
+        let should_attack = self.is_player_staring_vanilla(player);
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load_full();
+        player
+            .plugin_event(|p| {
+                let fallback: Arc<dyn EntityBase> = p.clone();
+                crate::plugin::api::events::entity::enderman_attack_player::EndermanAttackPlayerEvent {
+                    enderman: world.get_entity_by_id(entity.entity_id).unwrap_or(fallback),
+                    player: p,
+                    should_attack,
+                }
+            })
+            .map_or(should_attack, |event| event.should_attack)
+    }
+
+    fn is_player_staring_vanilla(&self, player: &Player) -> bool {
         let equipment = player.living_entity.entity_equipment.try_lock();
         if let Ok(equipment) = equipment
             && let Some(head_stack) = equipment.equipment.get(&EquipmentSlot::HEAD)

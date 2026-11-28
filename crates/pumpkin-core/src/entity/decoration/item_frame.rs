@@ -447,6 +447,35 @@ impl EntityBase for ItemFrameEntity {
         let frame_has_item = !self.get_item().is_empty();
         let has_held_item = !item_stack.is_empty();
 
+        // Paper `PlayerItemFrameChangeEvent` (rotate or place)
+        let action = if frame_has_item {
+            "ROTATE"
+        } else if has_held_item && !self.entity.removed.load(Ordering::Relaxed) {
+            "PLACE"
+        } else {
+            ""
+        };
+        if !action.is_empty()
+            && let Some(frame) = self.entity.world.load().get_entity_by_id(self.entity.entity_id)
+            && player
+                .plugin_event(|player| {
+                    crate::plugin::api::events::player::player_item_frame_change::PlayerItemFrameChangeEvent {
+                        player,
+                        item_frame: frame,
+                        item: if frame_has_item {
+                            self.get_item()
+                        } else {
+                            item_stack.copy_with_count(1)
+                        },
+                        action: action.to_string(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+        {
+            return true;
+        }
+
         if frame_has_item {
             let new_rot = self.get_rotation() + 1;
             self.set_rotation(new_rot, true);

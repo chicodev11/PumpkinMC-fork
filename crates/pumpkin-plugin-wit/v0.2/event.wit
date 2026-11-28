@@ -1257,6 +1257,332 @@ interface event {
         ticks-held-for: s32
     }
 
+    /// Paper `PlayerItemGroupCooldownEvent`: a cooldown group is about to start. Change `cooldown` (ticks) or cancel.
+    record player-item-group-cooldown-event-data {
+        player: player,
+        cooldown-group: string,
+        cooldown: s32,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerItemCooldownEvent`: an item's use starts a cooldown. Change `cooldown` (ticks) or cancel.
+    record player-item-cooldown-event-data {
+        player: player,
+        item-type: string,
+        cooldown-group: string,
+        cooldown: s32,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerLaunchProjectileEvent`: a player throws a projectile item (snowball, egg, ender pearl,
+    /// experience bottle, splash/lingering potion, wind charge, trident). Cancel to stop the throw.
+    record player-launch-projectile-event-data {
+        player: player,
+        item: item-stack,
+        projectile: entity,
+        should-consume: bool,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerStartSpectatingEntityEvent`: a spectator starts viewing through an entity.
+    record player-start-spectating-entity-event-data {
+        player: player,
+        current-spectator-target: entity,
+        new-spectator-target: entity,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerStopSpectatingEntityEvent`: a spectator stops viewing through an entity.
+    record player-stop-spectating-entity-event-data {
+        player: player,
+        spectator-target: entity,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerAttackEntityCooldownResetEvent`: an attack resets the attack charge. Cancel to keep it.
+    record player-attack-entity-cooldown-reset-event-data {
+        player: player,
+        attacked: entity,
+        cooldown: f32,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerArmorChangeEvent`: an armor slot changed. Read-only.
+    record player-armor-change-event-data {
+        player: player,
+        slot: string,
+        old-item: item-stack,
+        new-item: item-stack
+    }
+
+    /// Paper `PlayerDeepSleepEvent`: the player has slept long enough to count for skipping the night.
+    /// Cancelling restarts the sleep count.
+    record player-deep-sleep-event-data {
+        player: player,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerShieldDisableEvent`: an attack disables the player's shield. Change `cooldown` or cancel.
+    record player-shield-disable-event-data {
+        player: player,
+        damager: option<entity>,
+        cooldown: s32,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerArmSwingEvent`: the player swings a hand (`HAND` or `OFF_HAND`).
+    record player-arm-swing-event-data {
+        player: player,
+        hand: string,
+        cancelled: bool
+    }
+
+    /// Paper `ClientTickEndEvent`: the client finished a tick. Keep handlers quick.
+    record client-tick-end-event-data {
+        player: player
+    }
+
+    /// Paper `PlayerClientOptionsChangeEvent`: the client sent its options, before they apply. Read-only.
+    record player-client-options-change-event-data {
+        player: player,
+        locale: string,
+        view-distance: s32,
+        chat-visibility: string,
+        chat-colors: bool,
+        skin-parts: s32,
+        main-hand: string,
+        text-filtering: bool,
+        allow-server-listings: bool
+    }
+
+    /// Paper `PlayerSwapWithEquipmentSlotEvent`: right-clicking equips the held item (armor, elytra, heads).
+    record player-swap-with-equipment-slot-event-data {
+        player: player,
+        hand: string,
+        slot: string,
+        item: item-stack,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerMapFilledEvent`: an empty map was used. Change `created-map` to give another item.
+    record player-map-filled-event-data {
+        player: player,
+        original-item: item-stack,
+        created-map: item-stack
+    }
+
+    /// Paper `PlayerFlowerPotManipulateEvent`: a plant goes into (`placing`) or out of a flower pot.
+    record player-flower-pot-manipulate-event-data {
+        player: player,
+        flowerpot: block-pos,
+        item: item-stack,
+        placing: bool,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerConnectionCloseEvent`: a joined player's connection closed. Read-only.
+    record player-connection-close-event-data {
+        player-uuid: string,
+        player-name: string
+    }
+
+    /// Paper `PlayerItemFrameChangeEvent`: a player puts an item into (`PLACE`) or turns (`ROTATE`) an item frame.
+    record player-item-frame-change-event-data {
+        player: player,
+        item-frame: entity,
+        item: item-stack,
+        action: string,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerReadyArrowEvent`: a bow or crossbow picks an arrow. Cancel to skip it (the next is tried).
+    record player-ready-arrow-event-data {
+        player: player,
+        bow: item-stack,
+        arrow: item-stack,
+        cancelled: bool
+    }
+
+    /// Paper `AnvilDamagedEvent`: using an anvil damages it. `damage-state` is FULL, CHIPPED, DAMAGED or BROKEN.
+    record anvil-damaged-event-data {
+        player: player,
+        block: block-pos,
+        damage-state: string,
+        cancelled: bool
+    }
+
+    /// Paper `CreeperIgniteEvent`: a creeper is lit with flint and steel.
+    record creeper-ignite-event-data {
+        creeper: entity,
+        ignited: bool,
+        cancelled: bool
+    }
+
+    /// Paper `PufferFishStateChangeEvent`: a pufferfish puffs up or down (0 small, 1 mid, 2 full).
+    record puffer-fish-state-change-event-data {
+        pufferfish: entity,
+        new-puff-state: s32,
+        cancelled: bool
+    }
+
+    /// Paper `EndermanAttackPlayerEvent`: an enderman checks whether a player stares at it. Change `should-attack`.
+    record enderman-attack-player-event-data {
+        enderman: entity,
+        player: player,
+        should-attack: bool
+    }
+
+    /// Paper `ThrownEggHatchEvent`: a thrown egg broke. Change `hatching` or `num-hatches`.
+    record thrown-egg-hatch-event-data {
+        egg: entity,
+        hatching: bool,
+        num-hatches: s32,
+        hatching-type: string
+    }
+
+    /// Paper `ElderGuardianAppearanceEvent`: an elder guardian curses a player (the face and mining fatigue).
+    record elder-guardian-appearance-event-data {
+        guardian: entity,
+        affected-player: player,
+        cancelled: bool
+    }
+
+    /// Paper `EntityJumpEvent`: a living entity other than a player jumps.
+    record entity-jump-event-data {
+        entity: entity,
+        cancelled: bool
+    }
+
+    /// Paper `ExperienceOrbMergeEvent`: one experience orb absorbs another.
+    record experience-orb-merge-event-data {
+        merge-target: entity,
+        merge-source: entity,
+        cancelled: bool
+    }
+
+    /// Paper `EntityPathfindEvent`: a mob starts finding a path to `location`.
+    record entity-pathfind-event-data {
+        entity: entity,
+        location: position,
+        target-entity: option<entity>,
+        cancelled: bool
+    }
+
+    /// Paper `EntityInsideBlockEvent`: an entity is inside a block that acts on it (fire, cobweb, portals...).
+    /// Fired every tick while inside, so keep handlers quick.
+    record entity-inside-block-event-data {
+        entity: entity,
+        block: block-pos,
+        cancelled: bool
+    }
+
+    /// Paper `SkeletonHorseTrapEvent`: a skeleton trap horse is set off by nearby players.
+    record skeleton-horse-trap-event-data {
+        horse: entity,
+        eligible-players: list<entity>,
+        cancelled: bool
+    }
+
+    /// Paper `EntityLoadCrossbowEvent`: a crossbow is loaded. Set `consume-item` to false to keep the ammo.
+    record entity-load-crossbow-event-data {
+        entity: player,
+        crossbow: item-stack,
+        hand: string,
+        consume-item: bool,
+        cancelled: bool
+    }
+
+    /// Paper `BeaconEffectEvent`: a beacon gives a player its effect. Change the effect or cancel.
+    record beacon-effect-event-data {
+        block: block-pos,
+        player: player,
+        effect-type: string,
+        amplifier: s32,
+        duration: s32,
+        is-primary: bool,
+        cancelled: bool
+    }
+
+    /// Paper `BeaconActivatedEvent`: a beacon got a valid base.
+    record beacon-activated-event-data {
+        block: block-pos,
+        levels: s32
+    }
+
+    /// Paper `BeaconDeactivatedEvent`: a beacon lost its base.
+    record beacon-deactivated-event-data {
+        block: block-pos
+    }
+
+    /// Paper `TargetHitEvent`: a projectile hit a target block. Change `signal-strength` (0-15) or cancel.
+    record target-hit-event-data {
+        projectile: entity,
+        block: block-pos,
+        signal-strength: s32,
+        cancelled: bool
+    }
+
+    /// Paper `BlockPreDispenseEvent`: a dispenser picked the item in `slot` and is about to dispense it.
+    record block-pre-dispense-event-data {
+        block: block-pos,
+        item: item-stack,
+        slot: s32,
+        cancelled: bool
+    }
+
+    /// Paper `BlockFailedDispenseEvent`: a dispenser or dropper was powered while empty.
+    record block-failed-dispense-event-data {
+        block: block-pos,
+        should-play-effect: bool
+    }
+
+    /// Paper `VaultChangeStateEvent`: a vault changes state (INACTIVE, ACTIVE, UNLOCKING, EJECTING).
+    record vault-change-state-event-data {
+        block: block-pos,
+        current-state: string,
+        new-state: string,
+        cancelled: bool
+    }
+
+    /// Paper `BlockBreakProgressUpdateEvent`: the crack progress (0-1) shown on a block changed.
+    record block-break-progress-update-event-data {
+        block: block-pos,
+        progress: f32,
+        entity: option<entity>
+    }
+
+    /// Paper `DragonEggFormEvent`: the dragon egg appears after the first dragon kill.
+    record dragon-egg-form-event-data {
+        block: block-pos,
+        cancelled: bool
+    }
+
+    /// Paper `BellRevealRaiderEvent`: a ringing bell makes a raider glow.
+    record bell-reveal-raider-event-data {
+        block: block-pos,
+        entity: entity,
+        cancelled: bool
+    }
+
+    /// Paper `WorldDifficultyChangeEvent`: the difficulty changed. Read-only.
+    record world-difficulty-change-event-data {
+        event-world: %world,
+        difficulty: string
+    }
+
+    /// Paper `WorldGameRuleChangeEvent`: a game rule is about to change. Change `value` or cancel.
+    record world-game-rule-change-event-data {
+        event-world: %world,
+        game-rule: string,
+        value: string,
+        cancelled: bool
+    }
+
+    /// Paper `ServerResourcesReloadedEvent`: datapacks were reloaded.
+    record server-resources-reloaded-event-data {
+        cause: string
+    }
+
     record player-harvest-block-event-data {
         player: player,
         block-pos: block-pos,
@@ -2426,6 +2752,49 @@ interface event {
         entity-move-event,
         pre-player-attack-entity-event,
         player-stop-using-item-event,
+        player-item-group-cooldown-event,
+        player-item-cooldown-event,
+        player-launch-projectile-event,
+        player-start-spectating-entity-event,
+        player-stop-spectating-entity-event,
+        player-attack-entity-cooldown-reset-event,
+        player-armor-change-event,
+        player-deep-sleep-event,
+        player-shield-disable-event,
+        player-arm-swing-event,
+        client-tick-end-event,
+        player-client-options-change-event,
+        player-swap-with-equipment-slot-event,
+        player-map-filled-event,
+        player-flower-pot-manipulate-event,
+        player-connection-close-event,
+        player-item-frame-change-event,
+        player-ready-arrow-event,
+        anvil-damaged-event,
+        creeper-ignite-event,
+        puffer-fish-state-change-event,
+        enderman-attack-player-event,
+        thrown-egg-hatch-event,
+        elder-guardian-appearance-event,
+        entity-jump-event,
+        experience-orb-merge-event,
+        entity-pathfind-event,
+        entity-inside-block-event,
+        skeleton-horse-trap-event,
+        entity-load-crossbow-event,
+        beacon-effect-event,
+        beacon-activated-event,
+        beacon-deactivated-event,
+        target-hit-event,
+        block-pre-dispense-event,
+        block-failed-dispense-event,
+        vault-change-state-event,
+        block-break-progress-update-event,
+        dragon-egg-form-event,
+        bell-reveal-raider-event,
+        world-difficulty-change-event,
+        world-game-rule-change-event,
+        server-resources-reloaded-event,
         player-harvest-block-event,
         player-hide-entity-event,
         player-item-break-event,
@@ -2722,6 +3091,49 @@ interface event {
         entity-move-event(entity-move-event-data),
         pre-player-attack-entity-event(pre-player-attack-entity-event-data),
         player-stop-using-item-event(player-stop-using-item-event-data),
+        player-item-group-cooldown-event(player-item-group-cooldown-event-data),
+        player-item-cooldown-event(player-item-cooldown-event-data),
+        player-launch-projectile-event(player-launch-projectile-event-data),
+        player-start-spectating-entity-event(player-start-spectating-entity-event-data),
+        player-stop-spectating-entity-event(player-stop-spectating-entity-event-data),
+        player-attack-entity-cooldown-reset-event(player-attack-entity-cooldown-reset-event-data),
+        player-armor-change-event(player-armor-change-event-data),
+        player-deep-sleep-event(player-deep-sleep-event-data),
+        player-shield-disable-event(player-shield-disable-event-data),
+        player-arm-swing-event(player-arm-swing-event-data),
+        client-tick-end-event(client-tick-end-event-data),
+        player-client-options-change-event(player-client-options-change-event-data),
+        player-swap-with-equipment-slot-event(player-swap-with-equipment-slot-event-data),
+        player-map-filled-event(player-map-filled-event-data),
+        player-flower-pot-manipulate-event(player-flower-pot-manipulate-event-data),
+        player-connection-close-event(player-connection-close-event-data),
+        player-item-frame-change-event(player-item-frame-change-event-data),
+        player-ready-arrow-event(player-ready-arrow-event-data),
+        anvil-damaged-event(anvil-damaged-event-data),
+        creeper-ignite-event(creeper-ignite-event-data),
+        puffer-fish-state-change-event(puffer-fish-state-change-event-data),
+        enderman-attack-player-event(enderman-attack-player-event-data),
+        thrown-egg-hatch-event(thrown-egg-hatch-event-data),
+        elder-guardian-appearance-event(elder-guardian-appearance-event-data),
+        entity-jump-event(entity-jump-event-data),
+        experience-orb-merge-event(experience-orb-merge-event-data),
+        entity-pathfind-event(entity-pathfind-event-data),
+        entity-inside-block-event(entity-inside-block-event-data),
+        skeleton-horse-trap-event(skeleton-horse-trap-event-data),
+        entity-load-crossbow-event(entity-load-crossbow-event-data),
+        beacon-effect-event(beacon-effect-event-data),
+        beacon-activated-event(beacon-activated-event-data),
+        beacon-deactivated-event(beacon-deactivated-event-data),
+        target-hit-event(target-hit-event-data),
+        block-pre-dispense-event(block-pre-dispense-event-data),
+        block-failed-dispense-event(block-failed-dispense-event-data),
+        vault-change-state-event(vault-change-state-event-data),
+        block-break-progress-update-event(block-break-progress-update-event-data),
+        dragon-egg-form-event(dragon-egg-form-event-data),
+        bell-reveal-raider-event(bell-reveal-raider-event-data),
+        world-difficulty-change-event(world-difficulty-change-event-data),
+        world-game-rule-change-event(world-game-rule-change-event-data),
+        server-resources-reloaded-event(server-resources-reloaded-event-data),
         player-harvest-block-event(player-harvest-block-event-data),
         player-hide-entity-event(player-hide-entity-event-data),
         player-item-break-event(player-item-break-event-data),

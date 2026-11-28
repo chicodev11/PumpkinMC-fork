@@ -156,6 +156,20 @@ impl BellBlockEntity {
             {
                 continue;
             }
+            // Paper `BellRevealRaiderEvent`
+            let world = raider.get_entity().world.load_full();
+            if world
+                .plugin_event(|| {
+                    crate::plugin::api::events::block::bell_reveal_raider::BellRevealRaiderEvent {
+                        block: self.position,
+                        entity: raider.clone(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                continue;
+            }
             if let Some(living) = raider.get_living_entity() {
                 living.add_effect(Effect {
                     effect_type: &StatusEffect::GLOWING,

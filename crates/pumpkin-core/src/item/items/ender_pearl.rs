@@ -62,10 +62,17 @@ impl ItemBehaviour for EnderPearlItem {
         pearl
             .thrown
             .set_velocity_from(pitch, yaw, ROLL, POWER, DIVERGENCE);
-        world.spawn_entity(Arc::new(pearl));
+        let projectile: Arc<dyn crate::entity::EntityBase> = Arc::new(pearl);
+        // Paper `PlayerLaunchProjectileEvent`
+        let Some(consume) = player.launch_projectile_event(&stack, &projectile) else {
+            return;
+        };
+        world.spawn_entity(projectile);
 
         let item_id = stack.item.id;
-        stack.decrement_unless_creative(player.gamemode.load(), 1);
+        if consume {
+            stack.decrement_unless_creative(player.gamemode.load(), 1);
+        }
         match hand {
             pumpkin_util::Hand::Right => player.inventory.set_held_item(stack),
             pumpkin_util::Hand::Left => player

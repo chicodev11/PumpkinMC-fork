@@ -308,6 +308,19 @@ impl BlockBehaviour for DispenserBlock {
                 None,
             );
             if let Some((slot_index, mut item)) = dispenser.get_random_slot() {
+                // Paper `BlockPreDispenseEvent`
+                if args
+                    .world
+                    .plugin_event(|| crate::plugin::api::events::block::block_pre_dispense::BlockPreDispenseEvent {
+                        block: *args.position,
+                        item: item.clone(),
+                        slot: i32::try_from(slot_index).unwrap_or(i32::MAX),
+                        cancelled: false,
+                    })
+                    .is_some_and(|event| event.cancelled)
+                {
+                    return;
+                }
                 let props = DispenserLikeProperties::from_state_id(state.id);
                 let ctx = DispenseContext {
                     world: args.world,
@@ -317,8 +330,18 @@ impl BlockBehaviour for DispenserBlock {
                 Self::dispense(&ctx, dispenser, &mut item);
                 dispenser.set_stack(slot_index, item);
             } else {
-                args.world
-                    .sync_world_event(WorldEvent::SoundDispenserFail, *args.position, 0);
+                // Paper `BlockFailedDispenseEvent`
+                let play_effect = args
+                    .world
+                    .plugin_event(|| crate::plugin::api::events::block::block_failed_dispense::BlockFailedDispenseEvent {
+                        block: *args.position,
+                        should_play_effect: true,
+                    })
+                    .is_none_or(|event| event.should_play_effect);
+                if play_effect {
+                    args.world
+                        .sync_world_event(WorldEvent::SoundDispenserFail, *args.position, 0);
+                }
                 args.world.emit_game_event(
                     GameEvent::BlockActivate.name(),
                     args.position.to_centered_f64(),

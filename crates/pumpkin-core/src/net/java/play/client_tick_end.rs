@@ -3,6 +3,10 @@ use super::*;
 
 impl JavaClient {
     pub fn handle_client_tick_end(&self, player: &Player) {
+        // Paper `ClientTickEndEvent`
+        player.plugin_event(|player| {
+            crate::plugin::api::events::player::client_tick_end::ClientTickEndEvent { player }
+        });
         // If no movement packet arrived this tick the player is standing still —
         // zero out the known movement so consumers (e.g. riptide speed) see 0.
         // Matches vanilla ServerGamePacketListenerImpl#handleClientTickEnd.

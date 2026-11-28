@@ -91,6 +91,21 @@ impl Mob for ElderGuardianEntity {
                 {
                     continue;
                 }
+                // Paper `ElderGuardianAppearanceEvent`
+                if player
+                    .plugin_event(|affected_player| {
+                        crate::plugin::api::events::entity::elder_guardian_appearance::ElderGuardianAppearanceEvent {
+                            guardian: world
+                                .get_entity_by_id(entity.entity_id)
+                                .unwrap_or_else(|| affected_player.clone()),
+                            affected_player,
+                            cancelled: false,
+                        }
+                    })
+                    .is_some_and(|event| event.cancelled)
+                {
+                    continue;
+                }
                 player.try_send_client_packet(&packet);
                 player.living_entity.add_effect(Effect {
                     effect_type: &StatusEffect::MINING_FATIGUE,

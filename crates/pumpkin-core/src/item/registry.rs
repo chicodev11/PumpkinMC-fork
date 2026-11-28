@@ -55,6 +55,9 @@ impl ItemRegistry {
         if player.is_on_cooldown(&cooldown_group) {
             return;
         }
+        player
+            .item_use_failed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         if let Some(pumpkin_item) = self.get_pumpkin_item(item.id) {
             pumpkin_item.normal_use_with_hand(item, player, yaw, pitch, hand);
@@ -81,8 +84,11 @@ impl ItemRegistry {
         if let Some(cooldown) = cooldown
             && self.get_use_duration(item.id).is_none()
             && stack.get_max_use_time() == 0
+            && !player
+                .item_use_failed
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
         {
-            player.start_cooldown(cooldown_group, (cooldown.seconds * 20.0) as i32);
+            player.start_item_cooldown(stack, cooldown_group, (cooldown.seconds * 20.0) as i32);
         }
     }
 
@@ -174,7 +180,7 @@ impl ItemRegistry {
             BlockActionResult::Success | BlockActionResult::SuccessServer
         ) && let Some(cooldown) = cooldown
         {
-            player.start_cooldown(cooldown_group, (cooldown.seconds * 20.0) as i32);
+            player.start_item_cooldown(stack, cooldown_group, (cooldown.seconds * 20.0) as i32);
         }
 
         result

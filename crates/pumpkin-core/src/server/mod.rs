@@ -770,6 +770,16 @@ impl Server {
 
         self.recipe_manager.take_dirty();
         self.sync_recipes_to_players();
+        // Paper `ServerResourcesReloadedEvent`
+        if server
+            .plugin_manager
+            .has_handlers::<crate::plugin::api::events::server::server_resources_reloaded::ServerResourcesReloadedEvent>()
+        {
+            let mut event = crate::plugin::api::events::server::server_resources_reloaded::ServerResourcesReloadedEvent {
+                cause: "COMMAND".to_string(),
+            };
+            server.plugin_manager.fire_blocking(server, &mut event);
+        }
     }
 
     /// Sends the recipe property sets, stonecutter options and recipe book to every Java
@@ -1004,6 +1014,13 @@ impl Server {
     }
 
     pub fn remove_player(&self, player: &Player) {
+        // Paper `PlayerConnectionCloseEvent`
+        player.world().plugin_event(|| {
+            crate::plugin::api::events::player::player_connection_close::PlayerConnectionCloseEvent {
+                player_uuid: player.gameprofile.id.to_string(),
+                player_name: player.gameprofile.name.clone(),
+            }
+        });
         if self.telemetry_config.enabled {
             self.telemetry_sessions.record_leave(player);
         }
@@ -1192,6 +1209,11 @@ impl Server {
 
         for world in self.worlds.load().iter() {
             world.set_difficulty(new_difficulty);
+            // Paper `WorldDifficultyChangeEvent`
+            world.plugin_event(|| crate::plugin::api::events::world::world_difficulty_change::WorldDifficultyChangeEvent {
+                world: world.clone(),
+                difficulty: format!("{new_difficulty:?}").to_uppercase(),
+            });
             world.broadcast_editioned(
                 &CChangeDifficulty::new(new_difficulty as u8, locked),
                 &pumpkin_protocol::bedrock::client::CSetDifficulty {

@@ -153,6 +153,26 @@ impl EntityBase for EggEntity {
             }
         }
 
+        // Paper `ThrownEggHatchEvent`, for every egg
+        if let Some(event) = world
+            .get_entity_by_id(self.get_entity().entity_id)
+            .and_then(|egg| {
+                world.plugin_event(|| {
+                    crate::plugin::api::events::entity::thrown_egg_hatch::ThrownEggHatchEvent {
+                        egg,
+                        hatching,
+                        num_hatches: i32::try_from(to_spawn).unwrap_or(i32::MAX),
+                        hatching_type: format!("minecraft:{}", hatching_type.resource_name),
+                    }
+                })
+            })
+        {
+            hatching = event.hatching;
+            to_spawn = usize::try_from(event.num_hatches)
+                .unwrap_or(0)
+                .min(MAX_EGG_HATCH_EVENT_SPAWNS);
+        }
+
         if hatching && to_spawn > 0 {
             for _ in 0..to_spawn {
                 let mob = from_type(hatching_type, spawn_pos, &world, Uuid::new_v4());

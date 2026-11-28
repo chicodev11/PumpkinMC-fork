@@ -69,6 +69,22 @@ impl PufferfishEntity {
         self.puff_state.load(Relaxed)
     }
 
+    /// Paper `PufferFishStateChangeEvent`; `false` when a plugin cancelled the change.
+    fn puff_state_change_allowed(&self, new_state: i32) -> bool {
+        let entity = self.get_entity();
+        let world = entity.world.load_full();
+        !world
+            .get_entity_by_id(entity.entity_id)
+            .and_then(|pufferfish| {
+                world.plugin_event(|| crate::plugin::api::events::entity::puffer_fish_state_change::PufferFishStateChangeEvent {
+                    pufferfish,
+                    new_puff_state: new_state,
+                    cancelled: false,
+                })
+            })
+            .is_some_and(|event| event.cancelled)
+    }
+
     pub fn set_puff_state(&self, state: i32) {
         self.puff_state.store(state, Relaxed);
         self.get_entity()
@@ -149,9 +165,13 @@ impl Mob for PufferfishEntity {
         let state = self.get_puff_state();
         if self.inflate_counter.load(Relaxed) > 0 {
             if state == STATE_SMALL {
-                self.make_sound(Sound::EntityPufferFishBlowUp);
-                self.set_puff_state(STATE_MID);
-            } else if self.inflate_counter.load(Relaxed) > FULL_INFLATE_DELAY && state == STATE_MID
+                if self.puff_state_change_allowed(STATE_MID) {
+                    self.make_sound(Sound::EntityPufferFishBlowUp);
+                    self.set_puff_state(STATE_MID);
+                }
+            } else if self.inflate_counter.load(Relaxed) > FULL_INFLATE_DELAY
+                && state == STATE_MID
+                && self.puff_state_change_allowed(STATE_FULL)
             {
                 self.make_sound(Sound::EntityPufferFishBlowUp);
                 self.set_puff_state(STATE_FULL);
@@ -159,9 +179,14 @@ impl Mob for PufferfishEntity {
             self.inflate_counter.fetch_add(1, Relaxed);
         } else if state != STATE_SMALL {
             if self.deflate_timer.load(Relaxed) > MID_DEFLATE_DELAY && state == STATE_FULL {
-                self.make_sound(Sound::EntityPufferFishBlowOut);
-                self.set_puff_state(STATE_MID);
-            } else if self.deflate_timer.load(Relaxed) > SMALL_DEFLATE_DELAY && state == STATE_MID {
+                if self.puff_state_change_allowed(STATE_MID) {
+                    self.make_sound(Sound::EntityPufferFishBlowOut);
+                    self.set_puff_state(STATE_MID);
+                }
+            } else if self.deflate_timer.load(Relaxed) > SMALL_DEFLATE_DELAY
+                && state == STATE_MID
+                && self.puff_state_change_allowed(STATE_SMALL)
+            {
                 self.make_sound(Sound::EntityPufferFishBlowOut);
                 self.set_puff_state(STATE_SMALL);
             }

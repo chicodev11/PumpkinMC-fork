@@ -579,6 +579,20 @@ impl VaultBlockEntity {
         mut props: VaultLikeProperties,
         transition: Transition,
     ) {
+        // Paper `VaultChangeStateEvent`
+        if world
+            .plugin_event(|| {
+                crate::plugin::api::events::block::vault_change_state::VaultChangeStateEvent {
+                    block: self.position,
+                    current_state: format!("{:?}", transition.from).to_uppercase(),
+                    new_state: format!("{:?}", transition.to).to_uppercase(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+        {
+            return;
+        }
         props.vault_state = transition.to;
         world.set_block_state(
             &self.position,

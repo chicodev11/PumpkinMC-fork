@@ -780,6 +780,24 @@ impl PathNavigation {
         {
             return None;
         }
+        // Paper `EntityPathfindEvent`
+        if let Some(server) = world.server.upgrade()
+            && server
+                .plugin_manager
+                .has_handlers::<crate::plugin::api::events::entity::entity_pathfind::EntityPathfindEvent>()
+            && let Some(me) = world.get_entity_by_id(entity.entity.entity_id)
+        {
+            let mut event = crate::plugin::api::events::entity::entity_pathfind::EntityPathfindEvent {
+                entity: me,
+                location: destination,
+                target_entity: None,
+                cancelled: false,
+            };
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                return None;
+            }
+        }
         let mut target = BlockPos::floored_v(destination);
         if matches!(self.evaluator, EvaluatorKind::Walk(_))
             && !self.can_path_to_targets_below_surface

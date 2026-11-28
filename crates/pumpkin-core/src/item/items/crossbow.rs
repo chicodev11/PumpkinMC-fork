@@ -186,6 +186,25 @@ impl CrossbowItem {
         if arrow_slot.is_none() && !is_creative {
             return false;
         }
+        // Paper `EntityLoadCrossbowEvent`
+        let consume = match player.plugin_event(|player| {
+            crate::plugin::api::events::entity::entity_load_crossbow::EntityLoadCrossbowEvent {
+                entity: player,
+                crossbow: stack.clone(),
+                hand: if hand == Hand::Left {
+                    "OFF_HAND"
+                } else {
+                    "HAND"
+                }
+                .to_string(),
+                consume_item: true,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return false,
+            Some(event) => event.consume_item,
+            None => true,
+        };
 
         let projectile = arrow_slot.map_or_else(
             || ItemStack::new(1, &Item::ARROW),
@@ -212,6 +231,7 @@ impl CrossbowItem {
 
         if let Some(slot) = arrow_slot
             && !is_creative
+            && consume
         {
             player.consume_arrow(slot);
         }

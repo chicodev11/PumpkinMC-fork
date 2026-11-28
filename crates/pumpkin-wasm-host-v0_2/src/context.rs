@@ -284,6 +284,167 @@ fn register_player_event(
                 ctx, handler, priority, blocking,
             );
         }
+        EventType::PlayerItemGroupCooldownEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_item_group_cooldown::PlayerItemGroupCooldownEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerItemCooldownEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_item_cooldown::PlayerItemCooldownEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerLaunchProjectileEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_launch_projectile::PlayerLaunchProjectileEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerStartSpectatingEntityEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_start_spectating_entity::PlayerStartSpectatingEntityEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerStopSpectatingEntityEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_stop_spectating_entity::PlayerStopSpectatingEntityEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerAttackEntityCooldownResetEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_attack_entity_cooldown_reset::PlayerAttackEntityCooldownResetEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerArmorChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_armor_change::PlayerArmorChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerDeepSleepEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::player::player_deep_sleep::PlayerDeepSleepEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerShieldDisableEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_shield_disable::PlayerShieldDisableEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerArmSwingEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::player::player_arm_swing::PlayerArmSwingEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::ClientTickEndEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::player::client_tick_end::ClientTickEndEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerClientOptionsChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_client_options_change::PlayerClientOptionsChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerSwapWithEquipmentSlotEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_swap_with_equipment_slot::PlayerSwapWithEquipmentSlotEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerMapFilledEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::player::player_map_filled::PlayerMapFilledEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerFlowerPotManipulateEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_flower_pot_manipulate::PlayerFlowerPotManipulateEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerConnectionCloseEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_connection_close::PlayerConnectionCloseEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerItemFrameChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_item_frame_change::PlayerItemFrameChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::PlayerReadyArrowEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_ready_arrow::PlayerReadyArrowEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::AnvilDamagedEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::anvil_damaged::AnvilDamagedEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::CreeperIgniteEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::entity::creeper_ignite::CreeperIgniteEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PufferFishStateChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::puffer_fish_state_change::PufferFishStateChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::EndermanAttackPlayerEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::enderman_attack_player::EndermanAttackPlayerEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::ThrownEggHatchEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::entity::thrown_egg_hatch::ThrownEggHatchEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::ElderGuardianAppearanceEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::elder_guardian_appearance::ElderGuardianAppearanceEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::EntityJumpEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::entity::entity_jump::EntityJumpEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::ExperienceOrbMergeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::experience_orb_merge::ExperienceOrbMergeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::EntityPathfindEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::entity::entity_pathfind::EntityPathfindEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::EntityInsideBlockEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::entity_inside_block::EntityInsideBlockEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::SkeletonHorseTrapEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::skeleton_horse_trap::SkeletonHorseTrapEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::EntityLoadCrossbowEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::entity_load_crossbow::EntityLoadCrossbowEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::BeaconEffectEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::beacon_effect::BeaconEffectEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BeaconActivatedEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::beacon_activated::BeaconActivatedEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BeaconDeactivatedEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::block::beacon_deactivated::BeaconDeactivatedEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::TargetHitEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::target_hit::TargetHitEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BlockPreDispenseEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::block_pre_dispense::BlockPreDispenseEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BlockFailedDispenseEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::block::block_failed_dispense::BlockFailedDispenseEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::VaultChangeStateEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::vault_change_state::VaultChangeStateEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BlockBreakProgressUpdateEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::block::block_break_progress_update::BlockBreakProgressUpdateEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::DragonEggFormEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::dragon_egg_form::DragonEggFormEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::BellRevealRaiderEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::block::bell_reveal_raider::BellRevealRaiderEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::WorldDifficultyChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::world::world_difficulty_change::WorldDifficultyChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::WorldGameRuleChangeEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::world::world_game_rule_change::WorldGameRuleChangeEvent>(ctx, handler, priority, blocking);
+        }
+        EventType::ServerResourcesReloadedEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::server::server_resources_reloaded::ServerResourcesReloadedEvent>(ctx, handler, priority, blocking);
+        }
         EventType::PlayerUntrackEntityEvent => {
             register_typed_event::<pumpkin_core::plugin::api::events::player::player_untrack_entity::PlayerUntrackEntityEvent>(
                 ctx, handler, priority, blocking,

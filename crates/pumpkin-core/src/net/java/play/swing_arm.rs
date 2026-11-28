@@ -14,6 +14,25 @@ impl JavaClient {
             return;
         };
 
+        // Paper `PlayerArmSwingEvent` (a `PlayerAnimationEvent` there)
+        if player
+            .plugin_event(|player| {
+                crate::plugin::api::events::player::player_arm_swing::PlayerArmSwingEvent {
+                    player,
+                    hand: if hand == Hand::Left {
+                        "OFF_HAND"
+                    } else {
+                        "HAND"
+                    }
+                    .to_string(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+        {
+            return;
+        }
+
         let mut anim_event = crate::plugin::api::events::player::player_animation::PlayerAnimationEvent::new(
             player.clone(),
             match hand {

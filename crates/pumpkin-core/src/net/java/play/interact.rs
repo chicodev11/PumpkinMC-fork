@@ -39,8 +39,7 @@ impl JavaClient {
                 return;
             }
             if player.gamemode.load() == GameMode::Spectator {
-                player.camera_target_id.store(Some(entity_id.0));
-                player.try_send_client_packet(&CSetCamera::new(entity_id));
+                player.set_camera_entity_id(entity_id.0);
                 return;
             }
             send_cancellable_blocking! {{

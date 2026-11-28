@@ -42,12 +42,41 @@ impl CommandExecutor for QueryExecutor {
     }
 }
 
+/// Paper `WorldGameRuleChangeEvent` for `/gamerule` (fired for the main world, where the
+/// shared rules live): `None` when a plugin cancelled the change, otherwise the value to set.
+fn game_rule_change_event(
+    context: &CommandContext,
+    rule: &GameRule,
+    value: String,
+) -> Option<String> {
+    let Some(world) = context.server().worlds.load().first().cloned() else {
+        return Some(value);
+    };
+    match world.plugin_event(|| {
+        crate::plugin::api::events::world::world_game_rule_change::WorldGameRuleChangeEvent {
+            world: world.clone(),
+            game_rule: rule.to_string(),
+            value: value.clone(),
+            cancelled: false,
+        }
+    }) {
+        Some(event) if event.cancelled => None,
+        Some(event) => Some(event.value),
+        None => Some(value),
+    }
+}
+
 struct SetIntExecutor(GameRule);
 
 impl CommandExecutor for SetIntExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let key = TextComponent::text(self.0.to_string());
         let arg_value = IntegerArgumentType::get(context, "value")? as i64;
+        let Some(new_value) = game_rule_change_event(context, &self.0, arg_value.to_string())
+        else {
+            return Ok(0);
+        };
+        let arg_value = new_value.parse().unwrap_or(arg_value);
 
         let current_info = context.server().level_info.load();
         let mut new_info = (**current_info).clone();
@@ -78,6 +107,11 @@ impl CommandExecutor for SetBoolExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let key = TextComponent::text(self.0.to_string());
         let arg_value = BoolArgumentType::get(context, "value")?;
+        let Some(new_value) = game_rule_change_event(context, &self.0, arg_value.to_string())
+        else {
+            return Ok(0);
+        };
+        let arg_value = new_value.parse().unwrap_or(arg_value);
 
         let current_info = context.server().level_info.load();
         let mut new_info = (**current_info).clone();

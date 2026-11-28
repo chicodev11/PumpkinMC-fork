@@ -26,6 +26,7 @@ pub mod enchantment;
 pub mod entity;
 pub mod hanging;
 pub mod inventory;
+pub mod paper_events;
 pub mod player;
 pub mod raid;
 pub mod server;

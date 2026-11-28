@@ -2566,6 +2566,27 @@ impl LivingEntity {
     }
 
     pub(crate) fn jump(&self, caller: &dyn EntityBase) {
+        // Paper `EntityJumpEvent` (players have `PlayerJumpEvent`)
+        if caller.get_player().is_none() {
+            let world = self.entity.world.load_full();
+            if let Some(server) = world.server.upgrade()
+                && server
+                    .plugin_manager
+                    .has_handlers::<crate::plugin::api::events::entity::entity_jump::EntityJumpEvent>()
+                && let Some(entity) = world.get_entity_by_id(self.entity.entity_id)
+            {
+                let mut event = crate::plugin::api::events::entity::entity_jump::EntityJumpEvent {
+                    entity,
+                    cancelled: false,
+                };
+                server.plugin_manager.fire_blocking(&server, &mut event);
+                if event.cancelled {
+                    // Paper: a cancelled jump also stops the jump input
+                    self.jumping.store(false, SeqCst);
+                    return;
+                }
+            }
+        }
         let mob = caller.get_mob();
         self.jump_from_ground(mob.map_or(1.0, crate::entity::mob::Mob::jump_power_multiplier));
         if let Some(mob) = mob {
@@ -4521,8 +4542,21 @@ impl LivingEntity {
         }
         // `BlocksAttacks.disable`
         let ticks = blocks_attacks.disable_blocking_for_ticks(disable_seconds);
+        // Paper `PlayerShieldDisableEvent`
+        let ticks = match player.plugin_event(|p| {
+            crate::plugin::api::events::player::player_shield_disable::PlayerShieldDisableEvent {
+                player: p,
+                damager: world.get_entity_by_id(attacker.get_entity().entity_id),
+                cooldown: ticks,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return,
+            Some(event) => event.cooldown,
+            None => ticks,
+        };
         if ticks > 0 {
-            player.start_cooldown(stack.item.registry_key.to_string(), ticks);
+            player.start_item_cooldown(stack, stack.item.registry_key.to_string(), ticks);
             self.clear_active_hand();
             if let Some(sound) = &blocks_attacks.disabled_sound {
                 let pos = self.entity.pos.load();
@@ -4993,7 +5027,7 @@ impl EntityBase for LivingEntity {
                             .cooldown_group
                             .clone()
                             .unwrap_or_else(|| item.item.registry_key.to_string());
-                        player.start_cooldown(group, (cooldown.seconds * 20.0) as i32);
+                        player.start_item_cooldown(item, group, (cooldown.seconds * 20.0) as i32);
                     }
                 }
 

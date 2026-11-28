@@ -139,6 +139,23 @@ impl JavaClient {
                 return;
             }
 
+            // Paper `PlayerSwapWithEquipmentSlotEvent`
+            if player
+                .plugin_event(|p| {
+                    crate::plugin::api::events::player::player_swap_with_equipment_slot::PlayerSwapWithEquipmentSlotEvent {
+                        player: p,
+                        hand: if hand == Hand::Left { "OFF_HAND" } else { "HAND" }.to_string(),
+                        slot: Player::equipment_slot_name(&slot).to_string(),
+                        item: held.clone(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                player.sync_inventory_to_client();
+                return;
+            }
+
             // Vanilla `Equippable.swapWithEquipmentSlot`
             player.increment_stat(StatisticCategory::Used, i32::from(held.item.id), 1);
 

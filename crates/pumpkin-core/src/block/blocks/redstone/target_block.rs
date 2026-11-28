@@ -60,7 +60,27 @@ impl BlockBehaviour for TargetBlock {
             .world
             .is_block_tick_scheduled(args.position, args.block)
         {
-            let power = get_redstone_strength(args.hit_pos);
+            let mut power = get_redstone_strength(args.hit_pos);
+            // Paper `TargetHitEvent`
+            if let Some(event) = args
+                .world
+                .get_entity_by_id(args.projectile.get_entity().entity_id)
+                .and_then(|projectile| {
+                    args.world.plugin_event(|| {
+                        crate::plugin::api::events::block::target_hit::TargetHitEvent {
+                            projectile,
+                            block: *args.position,
+                            signal_strength: i32::from(power),
+                            cancelled: false,
+                        }
+                    })
+                })
+            {
+                if event.cancelled {
+                    return;
+                }
+                power = u8::try_from(event.signal_strength.clamp(0, 15)).unwrap_or(15);
+            }
             let mut props = TargetProperties::from_state_id(args.state.id);
             props.r#power = power;
             args.world.set_block_state(

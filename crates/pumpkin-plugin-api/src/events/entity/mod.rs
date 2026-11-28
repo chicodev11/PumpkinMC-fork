@@ -159,12 +159,38 @@ pub mod villager_reputation_change;
 /// Warden anger change event.
 pub mod warden_anger_change;
 
+/// Creeper Ignite event.
+pub mod creeper_ignite;
+/// Elder Guardian Appearance event.
+pub mod elder_guardian_appearance;
+/// Enderman Attack Player event.
+pub mod enderman_attack_player;
+/// Entity Inside Block event.
+pub mod entity_inside_block;
+/// Entity Jump event.
+pub mod entity_jump;
+/// Entity Load Crossbow event.
+pub mod entity_load_crossbow;
+/// Entity Pathfind event.
+pub mod entity_pathfind;
+/// Experience Orb Merge event.
+pub mod experience_orb_merge;
+/// Puffer Fish State Change event.
+pub mod puffer_fish_state_change;
+/// Skeleton Horse Trap event.
+pub mod skeleton_horse_trap;
+/// Thrown Egg Hatch event.
+pub mod thrown_egg_hatch;
+
 pub use area_effect_cloud_apply::*;
 pub use arrow_body_count_change::*;
 pub use bat_toggle_sleep::*;
 pub use creature_spawn::*;
+pub use creeper_ignite::*;
 pub use creeper_power::*;
+pub use elder_guardian_appearance::*;
 pub use ender_dragon_change_phase::*;
+pub use enderman_attack_player::*;
 pub use entity_add_to_world::*;
 pub use entity_air_change::*;
 pub use entity_break_door::*;
@@ -184,11 +210,15 @@ pub use entity_enter_block::*;
 pub use entity_enter_love_mode::*;
 pub use entity_exhaustion::*;
 pub use entity_explode::*;
+pub use entity_inside_block::*;
 pub use entity_interact::*;
+pub use entity_jump::*;
 pub use entity_knockback::*;
 pub use entity_knockback_by_entity::*;
+pub use entity_load_crossbow::*;
 pub use entity_mount::*;
 pub use entity_move::*;
+pub use entity_pathfind::*;
 pub use entity_pickup_item::*;
 pub use entity_place::*;
 pub use entity_portal::*;
@@ -214,6 +244,7 @@ pub use entity_toggle_swim::*;
 pub use entity_transform::*;
 pub use entity_unleash::*;
 pub use exp_bottle::*;
+pub use experience_orb_merge::*;
 pub use explosion_prime::*;
 pub use firework_explode::*;
 pub use food_level_change::*;
@@ -228,11 +259,14 @@ pub use piglin_barter::*;
 pub use potion_splash::*;
 pub use projectile_hit::*;
 pub use projectile_launch::*;
+pub use puffer_fish_state_change::*;
 pub use sheep_dye_wool::*;
 pub use sheep_regrow_wool::*;
+pub use skeleton_horse_trap::*;
 pub use slime_split::*;
 pub use spawner_spawn::*;
 pub use strider_temperature_change::*;
+pub use thrown_egg_hatch::*;
 pub use trial_spawner_spawn::*;
 pub use villager_acquire_trade::*;
 pub use villager_career_change::*;

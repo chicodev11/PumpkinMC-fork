@@ -226,6 +226,24 @@ impl ExperienceOrbEntity {
             {
                 continue;
             }
+            // Paper `ExperienceOrbMergeEvent`
+            let world = entity.world.load_full();
+            if let Some(server) = world.server.upgrade()
+                && server
+                    .plugin_manager
+                    .has_handlers::<crate::plugin::api::events::entity::experience_orb_merge::ExperienceOrbMergeEvent>()
+                && let Some(merge_target) = world.get_entity_by_id(entity.entity_id)
+            {
+                let mut event = crate::plugin::api::events::entity::experience_orb_merge::ExperienceOrbMergeEvent {
+                    merge_target,
+                    merge_source: other.clone(),
+                    cancelled: false,
+                };
+                server.plugin_manager.fire_blocking(&server, &mut event);
+                if event.cancelled {
+                    continue;
+                }
+            }
             self.merge(orb);
         }
     }

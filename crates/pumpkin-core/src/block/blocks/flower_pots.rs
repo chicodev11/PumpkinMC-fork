@@ -35,6 +35,23 @@ impl BlockBehaviour for FlowerPotBlock {
         if !args.block.eq(&Block::FLOWER_POT) {
             return BlockActionResult::Consume;
         }
+        // Paper `PlayerFlowerPotManipulateEvent` (placing)
+        if args
+            .player
+            .plugin_event(|player| {
+                crate::plugin::api::events::player::player_flower_pot_manipulate::PlayerFlowerPotManipulateEvent {
+                    player,
+                    flowerpot: *args.position,
+                    item: args.item_stack.clone(),
+                    placing: true,
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+        {
+            args.player.sync_inventory_to_client();
+            return BlockActionResult::Consume;
+        }
 
         args.world.set_block_state(
             args.position,
@@ -61,6 +78,22 @@ impl BlockBehaviour for FlowerPotBlock {
         }
 
         if let Some(plant_item) = get_plant_item_from_potted_block(args.block) {
+            // Paper `PlayerFlowerPotManipulateEvent` (taking out)
+            if args
+                .player
+                .plugin_event(|player| {
+                    crate::plugin::api::events::player::player_flower_pot_manipulate::PlayerFlowerPotManipulateEvent {
+                        player,
+                        flowerpot: *args.position,
+                        item: ItemStack::new(1, plant_item),
+                        placing: false,
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                return BlockActionResult::Consume;
+            }
             let mut stack = ItemStack::new(1, plant_item);
             args.player.inventory.insert_stack_anywhere(&mut stack);
             args.player.sync_inventory_to_client();

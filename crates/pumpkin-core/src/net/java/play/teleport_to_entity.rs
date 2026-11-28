@@ -23,8 +23,7 @@ impl JavaClient {
             let target_pitch = target_player.living_entity.entity.pitch.load();
 
             let target_id = target_player.living_entity.entity.entity_id;
-            player.camera_target_id.store(Some(target_id));
-            player.try_send_client_packet(&CSetCamera::new(target_id.into()));
+            player.set_camera_entity_id(target_id);
 
             player.request_teleport(target_pos, target_yaw, target_pitch);
         }

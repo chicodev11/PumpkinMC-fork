@@ -50,9 +50,16 @@ impl ItemBehaviour for ExperienceBottleItem {
         bottle
             .thrown
             .set_velocity_from(pitch, yaw, ROLL, POWER, DIVERGENCE);
-        world.spawn_entity(Arc::new(bottle));
+        let projectile: Arc<dyn crate::entity::EntityBase> = Arc::new(bottle);
+        // Paper `PlayerLaunchProjectileEvent`
+        let Some(consume) = player.launch_projectile_event(&stack, &projectile) else {
+            return;
+        };
+        world.spawn_entity(projectile);
 
-        stack.decrement_unless_creative(player.gamemode.load(), 1);
+        if consume {
+            stack.decrement_unless_creative(player.gamemode.load(), 1);
+        }
         inventory.set_stack_in_hand(hand, stack);
         player.increment_stat(StatisticCategory::Used, i32::from(item.id), 1);
     }

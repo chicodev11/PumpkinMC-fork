@@ -68,6 +68,16 @@ impl ItemBehaviour for MapItem {
             DataComponent::MapId,
             Some(MapIdImpl { id: map_id }.to_dyn()),
         ));
+        // Paper `PlayerMapFilledEvent`: plugins may hand out another item
+        if let Some(event) = player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_map_filled::PlayerMapFilledEvent {
+                player,
+                original_item: hand_stack.clone(),
+                created_map: filled_map.clone(),
+            }
+        }) {
+            filled_map = event.created_map;
+        }
 
         let slot_index = match hand {
             Hand::Right => inventory.get_selected_slot() as usize,

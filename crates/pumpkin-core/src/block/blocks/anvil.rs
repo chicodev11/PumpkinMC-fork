@@ -38,6 +38,31 @@ impl AnvilBlock {
     }
 }
 
+impl AnvilBlock {
+    /// Paper's `AnvilDamagedEvent.DamageState` name of the state an anvil would turn into.
+    #[must_use]
+    pub fn damage_state_name(next: Option<BlockStateId>) -> &'static str {
+        match next.map(Block::from_state_id) {
+            Some(block) if block == &Block::ANVIL => "FULL",
+            Some(block) if block == &Block::CHIPPED_ANVIL => "CHIPPED",
+            Some(_) => "DAMAGED",
+            None => "BROKEN",
+        }
+    }
+
+    /// The anvil state for a damage state name, keeping the facing; `None` for `BROKEN`.
+    #[must_use]
+    pub fn with_damage_state(state_id: BlockStateId, name: &str) -> Option<BlockStateId> {
+        let block = match name {
+            "FULL" => &Block::ANVIL,
+            "CHIPPED" => &Block::CHIPPED_ANVIL,
+            "DAMAGED" => &Block::DAMAGED_ANVIL,
+            _ => return None,
+        };
+        Some(WallTorchLikeProperties::from_state_id(state_id).to_state_id(block))
+    }
+}
+
 impl BlockBehaviour for AnvilBlock {
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         if let Some(factory) = self.get_screen_handler_factory(GetScreenHandlerFactoryArgs {

@@ -47,6 +47,29 @@ impl Goal for SkeletonTrapGoal {
         let entity = mob.get_entity();
         let world = entity.world.load_full();
         let pos = entity.pos.load();
+        // Paper `SkeletonHorseTrapEvent`
+        if let Some(server) = world.server.upgrade()
+            && server.plugin_manager.has_handlers::<
+                crate::plugin::api::events::entity::skeleton_horse_trap::SkeletonHorseTrapEvent,
+            >()
+            && let Some(horse_entity) = world.get_entity_by_id(entity.entity_id)
+        {
+            let eligible_players = world
+                .get_nearby_players(pos, TRIGGER_RANGE)
+                .into_iter()
+                .map(|player| player as Arc<dyn crate::entity::EntityBase>)
+                .collect();
+            let mut event =
+                crate::plugin::api::events::entity::skeleton_horse_trap::SkeletonHorseTrapEvent {
+                    horse: horse_entity,
+                    eligible_players,
+                    cancelled: false,
+                };
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                return;
+            }
+        }
         let difficulty = RegionalDifficulty::at(&world, pos);
         horse.set_trap(false);
         horse.set_tamed(true);
