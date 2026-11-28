@@ -2784,3 +2784,211 @@ mod paper_player {
         }
     }
 }
+
+mod paper_batch_two {
+    use crate::{
+        events::{
+            ToFromWasmEvent, cleanup_event, consume_player, consume_world, entity::consume_entity,
+            from_wasm_position, to_wasm_position,
+        },
+        pumpkin::plugin::event::{
+            EntityAddToWorldEventData, EntityMoveEventData, EntityRemoveFromWorldEventData, Event,
+            PlayerStopUsingItemEventData, PrePlayerAttackEntityEventData,
+        },
+    };
+    use pumpkin_core::plugin::api::events::{
+        entity::{
+            entity_add_to_world::EntityAddToWorldEvent, entity_move::EntityMoveEvent,
+            entity_remove_from_world::EntityRemoveFromWorldEvent,
+        },
+        player::{
+            player_stop_using_item::PlayerStopUsingItemEvent,
+            pre_player_attack_entity::PrePlayerAttackEntityEvent,
+        },
+    };
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_wasm_host_common::state::PluginHostState;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use wasmtime::component::Resource;
+
+    fn consume_item_stack(
+        state: &mut PluginHostState,
+        item: &Resource<crate::pumpkin::plugin::item_stack::ItemStack>,
+    ) -> ItemStack {
+        let mutex = state
+            .resource_table
+            .delete::<Arc<Mutex<ItemStack>>>(Resource::new_own(item.rep()))
+            .expect("invalid item stack resource handle");
+        mutex.try_lock().expect("lock item stack").clone()
+    }
+
+    impl ToFromWasmEvent for EntityAddToWorldEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let entity = state
+                .add(self.entity.clone())
+                .expect("failed to add entity resource");
+            let entity_world = state
+                .add(self.world.clone())
+                .expect("failed to add world resource");
+            Event::EntityAddToWorldEvent(EntityAddToWorldEventData {
+                entity,
+                entity_world,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::EntityAddToWorldEvent(data) => Self {
+                    entity: consume_entity(state, &data.entity).expect("entity resource"),
+                    world: consume_world(state, &data.entity_world),
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for EntityRemoveFromWorldEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let entity = state
+                .add(self.entity.clone())
+                .expect("failed to add entity resource");
+            let entity_world = state
+                .add(self.world.clone())
+                .expect("failed to add world resource");
+            Event::EntityRemoveFromWorldEvent(EntityRemoveFromWorldEventData {
+                entity,
+                entity_world,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::EntityRemoveFromWorldEvent(data) => Self {
+                    entity: consume_entity(state, &data.entity).expect("entity resource"),
+                    world: consume_world(state, &data.entity_world),
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for EntityMoveEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let entity = state
+                .add(self.entity.clone())
+                .expect("failed to add entity resource");
+            Event::EntityMoveEvent(EntityMoveEventData {
+                entity,
+                from_position: to_wasm_position(self.from),
+                from_yaw: self.from_yaw,
+                from_pitch: self.from_pitch,
+                to_position: to_wasm_position(self.to),
+                to_yaw: self.to_yaw,
+                to_pitch: self.to_pitch,
+                cancelled: self.cancelled,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+            if let Event::EntityMoveEvent(data) = event {
+                self.to = from_wasm_position(data.to_position);
+                self.to_yaw = data.to_yaw;
+                self.to_pitch = data.to_pitch;
+                self.cancelled = data.cancelled;
+            }
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::EntityMoveEvent(data) => Self {
+                    entity: consume_entity(state, &data.entity).expect("entity resource"),
+                    from: from_wasm_position(data.from_position),
+                    from_yaw: data.from_yaw,
+                    from_pitch: data.from_pitch,
+                    to: from_wasm_position(data.to_position),
+                    to_yaw: data.to_yaw,
+                    to_pitch: data.to_pitch,
+                    cancelled: data.cancelled,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PrePlayerAttackEntityEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let attacked = state
+                .add(self.attacked.clone())
+                .expect("failed to add entity resource");
+            Event::PrePlayerAttackEntityEvent(PrePlayerAttackEntityEventData {
+                player,
+                attacked,
+                will_attack: self.will_attack,
+                cancelled: self.cancelled,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+            if let Event::PrePlayerAttackEntityEvent(data) = event {
+                self.cancelled = data.cancelled;
+            }
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PrePlayerAttackEntityEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    attacked: consume_entity(state, &data.attacked).expect("entity resource"),
+                    will_attack: data.will_attack,
+                    cancelled: data.cancelled,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+
+    impl ToFromWasmEvent for PlayerStopUsingItemEvent {
+        fn to_wasm_event(&self, state: &mut PluginHostState) -> Event {
+            let player = state
+                .add(self.player.clone())
+                .expect("failed to add player resource");
+            let item = state
+                .add(Arc::new(Mutex::new(self.item.clone())))
+                .expect("failed to add item stack resource");
+            Event::PlayerStopUsingItemEvent(PlayerStopUsingItemEventData {
+                player,
+                item,
+                ticks_held_for: self.ticks_held_for,
+            })
+        }
+
+        fn apply_wasm_event(&mut self, event: Event, state: &mut PluginHostState) {
+            cleanup_event(&event, state);
+        }
+
+        fn from_wasm_event(event: Event, state: &mut PluginHostState) -> Self {
+            match event {
+                Event::PlayerStopUsingItemEvent(data) => Self {
+                    player: consume_player(state, &data.player),
+                    item: consume_item_stack(state, &data.item),
+                    ticks_held_for: data.ticks_held_for,
+                },
+                _ => panic!("unexpected event type"),
+            }
+        }
+    }
+}

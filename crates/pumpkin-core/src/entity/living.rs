@@ -1930,6 +1930,52 @@ impl LivingEntity {
         world.broadcast_editioned(&je_packet, &be_packet);
     }
 
+    /// Paper `EntityMoveEvent`, right after `aiStep`: a cancelled move snaps the entity back,
+    /// a changed destination snaps it there (`absSnapTo`).
+    fn fire_entity_move(&self, (from, from_yaw, from_pitch): (Vector3<f64>, f32, f32)) {
+        let world = self.entity.world.load_full();
+        let Some(server) = world.server.upgrade() else {
+            return;
+        };
+        if !server
+            .plugin_manager
+            .has_handlers::<crate::plugin::api::events::entity::entity_move::EntityMoveEvent>()
+        {
+            return;
+        }
+        let to = self.entity.pos.load();
+        let (to_yaw, to_pitch) = (self.entity.yaw.load(), self.entity.pitch.load());
+        if (from, from_yaw, from_pitch) == (to, to_yaw, to_pitch) {
+            return;
+        }
+        let Some(entity) = world.get_entity_by_id(self.entity.entity_id) else {
+            return;
+        };
+        let mut event = crate::plugin::api::events::entity::entity_move::EntityMoveEvent {
+            entity,
+            from,
+            from_yaw,
+            from_pitch,
+            to,
+            to_yaw,
+            to_pitch,
+            cancelled: false,
+        };
+        server.plugin_manager.fire_blocking(&server, &mut event);
+        if event.cancelled {
+            self.abs_snap_to(from, from_yaw, from_pitch);
+        } else if (event.to, event.to_yaw, event.to_pitch) != (to, to_yaw, to_pitch) {
+            self.abs_snap_to(event.to, event.to_yaw, event.to_pitch);
+        }
+    }
+
+    /// Vanilla `Entity.absSnapTo`: position and rotation, with the old position reset.
+    fn abs_snap_to(&self, pos: Vector3<f64>, yaw: f32, pitch: f32) {
+        self.entity.set_pos(pos);
+        self.entity.set_rotation(yaw, pitch);
+        self.entity.last_pos.store(pos);
+    }
+
     fn tick_movement(&self, caller: &dyn EntityBase) {
         if let Some(mob) = caller.get_mob() {
             mob.before_mob_ai_step();
@@ -4605,6 +4651,14 @@ impl EntityBase for LivingEntity {
         }
 
         let pre_tick_pos = self.entity.last_pos.load();
+        // Paper `EntityMoveEvent` compares against the old position and rotation
+        let move_from = (!is_player).then(|| {
+            (
+                self.entity.pos.load(),
+                self.entity.yaw.load(),
+                self.entity.pitch.load(),
+            )
+        });
         self.entity.tick(caller, server);
         self.tick_last_hurt_by_mob();
         if let Some(mob) = caller.get_mob() {
@@ -4698,6 +4752,9 @@ impl EntityBase for LivingEntity {
             self.stop_auto_spin_attack();
         }
         // End of vanilla `aiStep`.
+        if let Some(from) = move_from {
+            self.fire_entity_move(from);
+        }
         let grace = self.current_impulse_context_reset_grace_time.load(Relaxed);
         if grace > 0 {
             self.current_impulse_context_reset_grace_time

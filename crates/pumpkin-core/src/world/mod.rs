@@ -5887,6 +5887,27 @@ impl World {
         });
         self.record_tick_spawn(entity.get_entity().entity_id);
         self.add_pending_riders(&entity);
+        self.fire_entity_add_to_world(&entity);
+    }
+
+    /// Paper `EntityAddToWorldEvent`, once the entity is in the world's lists.
+    fn fire_entity_add_to_world(&self, entity: &Arc<dyn EntityBase>) {
+        self.plugin_event(|| {
+            crate::plugin::api::events::entity::entity_add_to_world::EntityAddToWorldEvent {
+                world: entity.get_entity().world.load_full(),
+                entity: entity.clone(),
+            }
+        });
+    }
+
+    /// Paper `EntityRemoveFromWorldEvent`, once the entity is out of the world's lists.
+    fn fire_entity_remove_from_world(&self, entity: &Arc<dyn EntityBase>) {
+        self.plugin_event(|| {
+            crate::plugin::api::events::entity::entity_remove_from_world::EntityRemoveFromWorldEvent {
+                world: entity.get_entity().world.load_full(),
+                entity: entity.clone(),
+            }
+        });
     }
 
     /// Records the sequential order of an entity spawned while an entity ticks.
@@ -6037,6 +6058,7 @@ impl World {
         });
         self.record_tick_spawn(entity.get_entity().entity_id);
         self.add_pending_riders(&entity);
+        self.fire_entity_add_to_world(&entity);
     }
 
     /// Fires a plugin event on this world's server, blocking until the handlers ran.
@@ -6129,6 +6151,9 @@ impl World {
         if let Some(mob) = entity.get_mob() {
             mob.get_mob_entity().finish_removal(mob);
         }
+        if let Some(registered) = &registered {
+            self.fire_entity_remove_from_world(registered);
+        }
     }
 
     pub async fn remove_entities_in_chunks(
@@ -6186,6 +6211,7 @@ impl World {
             if let Some(mob) = entity.get_mob() {
                 mob.get_mob_entity().finish_removal(mob);
             }
+            self.fire_entity_remove_from_world(&entity);
         }
 
         for chunk_pos in &chunks_set {

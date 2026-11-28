@@ -1216,6 +1216,47 @@ interface event {
         entity: entity
     }
 
+    /// Paper `EntityAddToWorldEvent`: spawned or loaded with its chunk. Read-only.
+    record entity-add-to-world-event-data {
+        entity: entity,
+        entity-world: %world
+    }
+
+    /// Paper `EntityRemoveFromWorldEvent`: removed or unloaded with its chunk. Read-only.
+    record entity-remove-from-world-event-data {
+        entity: entity,
+        entity-world: %world
+    }
+
+    /// Paper `EntityMoveEvent`: a living entity other than a player moved or turned this tick.
+    /// Cancelling puts it back at `from-position`; a changed `to-position`/rotation moves it there.
+    record entity-move-event-data {
+        entity: entity,
+        from-position: position,
+        from-yaw: f32,
+        from-pitch: f32,
+        to-position: position,
+        to-yaw: f32,
+        to-pitch: f32,
+        cancelled: bool
+    }
+
+    /// Paper `PrePlayerAttackEntityEvent`. `will-attack` is false when vanilla would skip the
+    /// attack (experience orbs, interaction entities without `response`). Cancelling stops it.
+    record pre-player-attack-entity-event-data {
+        player: player,
+        attacked: entity,
+        will-attack: bool,
+        cancelled: bool
+    }
+
+    /// Paper `PlayerStopUsingItemEvent`: the player let go of an item in use. Read-only.
+    record player-stop-using-item-event-data {
+        player: player,
+        item: item-stack,
+        ticks-held-for: s32
+    }
+
     record player-harvest-block-event-data {
         player: player,
         block-pos: block-pos,
@@ -2380,6 +2421,11 @@ interface event {
         player-post-respawn-event,
         player-track-entity-event,
         player-untrack-entity-event,
+        entity-add-to-world-event,
+        entity-remove-from-world-event,
+        entity-move-event,
+        pre-player-attack-entity-event,
+        player-stop-using-item-event,
         player-harvest-block-event,
         player-hide-entity-event,
         player-item-break-event,
@@ -2671,6 +2717,11 @@ interface event {
         player-post-respawn-event(player-post-respawn-event-data),
         player-track-entity-event(player-track-entity-event-data),
         player-untrack-entity-event(player-untrack-entity-event-data),
+        entity-add-to-world-event(entity-add-to-world-event-data),
+        entity-remove-from-world-event(entity-remove-from-world-event-data),
+        entity-move-event(entity-move-event-data),
+        pre-player-attack-entity-event(pre-player-attack-entity-event-data),
+        player-stop-using-item-event(player-stop-using-item-event-data),
         player-harvest-block-event(player-harvest-block-event-data),
         player-hide-entity-event(player-hide-entity-event-data),
         player-item-break-event(player-item-break-event-data),

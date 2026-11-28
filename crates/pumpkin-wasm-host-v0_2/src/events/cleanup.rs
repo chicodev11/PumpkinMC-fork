@@ -688,6 +688,25 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
             cleanup_player(state, &data.player);
             cleanup_entity(state, &data.entity);
         }
+        Event::EntityAddToWorldEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_world(state, &data.entity_world);
+        }
+        Event::EntityRemoveFromWorldEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_world(state, &data.entity_world);
+        }
+        Event::EntityMoveEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::PrePlayerAttackEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.attacked);
+        }
+        Event::PlayerStopUsingItemEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+        }
         Event::PlayerHarvestBlockEvent(data) => {
             cleanup_player(state, &data.player);
             for res in &data.harvested_items {

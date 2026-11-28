@@ -1604,8 +1604,58 @@ impl Player {
         true
     }
 
+    /// Paper `PrePlayerAttackEntityEvent`; `false` when a plugin cancelled the attack.
+    fn pre_attack_allowed(&self, victim: &Arc<dyn EntityBase>) -> bool {
+        let world = self.world();
+        let Some(player) = world.get_player_by_uuid(self.gameprofile.id) else {
+            return true;
+        };
+        // Vanilla `isAttackable() && !skipAttackInteraction(player)`: experience orbs are not
+        // attackable; an interaction entity skips player attacks unless it has `response`.
+        let will_attack = victim.get_entity().entity_type != &EntityType::EXPERIENCE_ORB
+            && victim
+                .cast_any()
+                .downcast_ref::<crate::entity::interaction::InteractionEntity>()
+                .is_none_or(crate::entity::interaction::InteractionEntity::get_response);
+        !world
+            .plugin_event(|| {
+                crate::plugin::api::events::player::pre_player_attack_entity::PrePlayerAttackEntityEvent {
+                    player,
+                    attacked: victim.clone(),
+                    will_attack,
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+    }
+
+    /// Paper `PlayerStopUsingItemEvent`, fired when the client releases an item in use,
+    /// before the item's release behaviour runs.
+    pub fn fire_stop_using_item(&self, stack: &ItemStack, server: &Server) {
+        let world = self.world();
+        let Some(player) = world.get_player_by_uuid(self.gameprofile.id) else {
+            return;
+        };
+        world.plugin_event(|| {
+            // Vanilla `getTicksUsingItem`: use duration minus the remaining ticks
+            let duration = server
+                .item_registry
+                .get_use_duration(stack.item.id)
+                .unwrap_or_else(|| stack.get_max_use_time());
+            let remaining = self.living_entity.item_use_time.load(Ordering::Relaxed);
+            crate::plugin::api::events::player::player_stop_using_item::PlayerStopUsingItemEvent {
+                player,
+                item: stack.clone(),
+                ticks_held_for: (duration - remaining).max(0),
+            }
+        });
+    }
+
     #[expect(clippy::too_many_lines)]
     pub fn attack(&self, victim: &Arc<dyn EntityBase>) {
+        if !self.pre_attack_allowed(victim) {
+            return;
+        }
         let world = self.world();
         let Some(server) = world.server.upgrade() else {
             return;

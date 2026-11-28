@@ -297,6 +297,7 @@ impl JavaClient {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .clone();
                     if let Some(stack) = item_in_use {
+                        player.fire_stop_using_item(&stack, server);
                         server.item_registry.on_stopped_using(&stack, player);
                     }
 

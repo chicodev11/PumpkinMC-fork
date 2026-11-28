@@ -527,6 +527,7 @@ impl BedrockClient {
                     let Some(server) = player.world().server.upgrade() else {
                         return;
                     };
+                    player.fire_stop_using_item(&stack, &server);
                     server.item_registry.on_stopped_using(&stack, player);
                 }
                 player.living_entity.clear_active_hand();

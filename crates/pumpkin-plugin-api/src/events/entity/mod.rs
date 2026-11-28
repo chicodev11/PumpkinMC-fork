@@ -10,6 +10,8 @@ pub mod creature_spawn;
 pub mod creeper_power;
 /// Ender dragon change phase event.
 pub mod ender_dragon_change_phase;
+/// Entity add to world event.
+pub mod entity_add_to_world;
 /// Entity air change event.
 pub mod entity_air_change;
 /// Entity break door event.
@@ -54,6 +56,8 @@ pub mod entity_knockback;
 pub mod entity_knockback_by_entity;
 /// Entity mount event.
 pub mod entity_mount;
+/// Entity move event.
+pub mod entity_move;
 /// Entity pickup item event.
 pub mod entity_pickup_item;
 /// Entity place event.
@@ -72,6 +76,8 @@ pub mod entity_potion_effect;
 pub mod entity_regain_health;
 /// Entity remove event.
 pub mod entity_remove;
+/// Entity remove from world event.
+pub mod entity_remove_from_world;
 /// Entity resurrect event.
 pub mod entity_resurrect;
 /// Entity shoot bow event.
@@ -159,6 +165,7 @@ pub use bat_toggle_sleep::*;
 pub use creature_spawn::*;
 pub use creeper_power::*;
 pub use ender_dragon_change_phase::*;
+pub use entity_add_to_world::*;
 pub use entity_air_change::*;
 pub use entity_break_door::*;
 pub use entity_breed::*;
@@ -181,6 +188,7 @@ pub use entity_interact::*;
 pub use entity_knockback::*;
 pub use entity_knockback_by_entity::*;
 pub use entity_mount::*;
+pub use entity_move::*;
 pub use entity_pickup_item::*;
 pub use entity_place::*;
 pub use entity_portal::*;
@@ -190,6 +198,7 @@ pub use entity_pose_change::*;
 pub use entity_potion_effect::*;
 pub use entity_regain_health::*;
 pub use entity_remove::*;
+pub use entity_remove_from_world::*;
 pub use entity_resurrect::*;
 pub use entity_shoot_bow::*;
 pub use entity_spawn::*;

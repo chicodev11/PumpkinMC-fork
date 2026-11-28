@@ -70,6 +70,7 @@ pub mod player_show_entity;
 pub mod player_spawn_change;
 pub mod player_spawn_location;
 pub mod player_statistic_increment;
+pub mod player_stop_using_item;
 pub mod player_swap_hands;
 pub mod player_take_lectern_book;
 pub mod player_teleport;
@@ -81,6 +82,7 @@ pub mod player_unleash_entity;
 pub mod player_unregister_channel;
 pub mod player_untrack_entity;
 pub mod player_velocity;
+pub mod pre_player_attack_entity;
 
 pub use async_player_chat::*;
 pub use async_player_pre_login::*;
@@ -151,6 +153,7 @@ pub use player_show_entity::*;
 pub use player_spawn_change::*;
 pub use player_spawn_location::*;
 pub use player_statistic_increment::*;
+pub use player_stop_using_item::*;
 pub use player_swap_hands::*;
 pub use player_take_lectern_book::*;
 pub use player_teleport::*;
@@ -162,6 +165,7 @@ pub use player_unleash_entity::*;
 pub use player_unregister_channel::*;
 pub use player_untrack_entity::*;
 pub use player_velocity::*;
+pub use pre_player_attack_entity::*;
 
 use std::sync::Arc;
 

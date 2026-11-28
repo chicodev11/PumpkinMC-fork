@@ -259,6 +259,31 @@ fn register_player_event(
                 ctx, handler, priority, blocking,
             );
         }
+        EventType::EntityAddToWorldEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::entity_add_to_world::EntityAddToWorldEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::EntityRemoveFromWorldEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::entity::entity_remove_from_world::EntityRemoveFromWorldEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::EntityMoveEvent => {
+            register_typed_event::<
+                pumpkin_core::plugin::api::events::entity::entity_move::EntityMoveEvent,
+            >(ctx, handler, priority, blocking);
+        }
+        EventType::PrePlayerAttackEntityEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::pre_player_attack_entity::PrePlayerAttackEntityEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
+        EventType::PlayerStopUsingItemEvent => {
+            register_typed_event::<pumpkin_core::plugin::api::events::player::player_stop_using_item::PlayerStopUsingItemEvent>(
+                ctx, handler, priority, blocking,
+            );
+        }
         EventType::PlayerUntrackEntityEvent => {
             register_typed_event::<pumpkin_core::plugin::api::events::player::player_untrack_entity::PlayerUntrackEntityEvent>(
                 ctx, handler, priority, blocking,
