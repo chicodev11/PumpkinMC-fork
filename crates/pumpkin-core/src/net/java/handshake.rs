@@ -19,6 +19,28 @@ impl PendingConnection {
 
         debug!("Handshake: next state is {:?}", &handshake.next_state);
         self.connection_state.store(handshake.next_state);
+        // Paper `PlayerHandshakeEvent`: a plugin handling the handshake (it stays cancelled
+        // otherwise) may rewrite the server address (for example to read proxy data) or refuse it
+        if handshake.next_state != ConnectionState::Status {
+            use crate::plugin::api::events::player::player_handshake::PlayerHandshakeEvent;
+            if server.plugin_manager.has_handlers::<PlayerHandshakeEvent>() {
+                let mut event = PlayerHandshakeEvent {
+                    original_handshake: self.server_address.clone(),
+                    server_hostname: self.server_address.clone(),
+                    failed: false,
+                    fail_message: "If you wish to use IP forwarding, please enable it in your BungeeCord config as well!".to_string(),
+                    cancelled: true,
+                };
+                server.plugin_manager.fire(server, &mut event).await;
+                if !event.cancelled {
+                    if event.failed {
+                        self.kick(TextComponent::text(event.fail_message)).await;
+                        return;
+                    }
+                    self.server_address = event.server_hostname;
+                }
+            }
+        }
         if handshake.next_state == ConnectionState::Transfer
             && !server.basic_config.accepts_transfers
         {

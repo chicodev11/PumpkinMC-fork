@@ -226,6 +226,20 @@ impl TransportItemsBetweenContainers {
                     if !Self::is_wanted_block(tick.mob, state) {
                         continue;
                     }
+                    // Paper `ItemTransportingEntityValidateTargetEvent`
+                    if tick
+                        .world
+                        .entity_event(entity.entity_id, |golem| {
+                            crate::plugin::api::events::entity::item_transporting_entity_validate_target::ItemTransportingEntityValidateTargetEvent {
+                                entity: golem,
+                                block: pos,
+                                allowed: true,
+                            }
+                        })
+                        .is_some_and(|event| !event.allowed)
+                    {
+                        continue;
+                    }
                     let Some(container) = get_chest_container(tick.world, &pos) else {
                         continue;
                     };

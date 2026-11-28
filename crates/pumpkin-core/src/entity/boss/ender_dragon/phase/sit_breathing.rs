@@ -71,7 +71,19 @@ impl super::Phase for SitBreathingPhase {
                 0.5,  // radius on use
                 -100, // duration on use
             );
-            world.spawn_entity(cloud);
+            // Paper `EnderDragonFlameEvent`
+            let cancelled = world
+                .entity_event(entity.entity_id, |dragon| {
+                    crate::plugin::api::events::entity::ender_dragon_flame::EnderDragonFlameEvent {
+                        dragon,
+                        area_effect_cloud: cloud.clone(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled);
+            if !cancelled {
+                world.spawn_entity(cloud);
+            }
         }
     }
 }

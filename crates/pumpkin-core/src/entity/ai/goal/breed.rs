@@ -74,6 +74,7 @@ impl BreedGoal {
     }
 
     /// `brain` is the breeding mob's brain while its own behavior runs this.
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn breed(
         mob: &dyn Mob,
         mate: &dyn EntityBase,
@@ -117,6 +118,40 @@ impl BreedGoal {
             mate.reset_love();
             mate.set_breeding_cooldown(6000);
             return;
+        };
+
+        // Paper `EntityFertilizeEggEvent` for animals that lay eggs or spawn (turtle, frog,
+        // sniffer) instead of a baby
+        let experience = if baby.is_none()
+            && let Some(father) = world.get_entity_by_id(mate.get_entity().entity_id)
+        {
+            let breeder = mob_entity
+                .breeder
+                .load()
+                .and_then(|uuid| world.get_player_by_uuid(uuid));
+            match world.entity_event(entity.entity_id, |mother| {
+                crate::plugin::api::events::entity::entity_fertilize_egg::EntityFertilizeEggEvent {
+                    entity: mother,
+                    father,
+                    breeder,
+                    experience,
+                    cancelled: false,
+                }
+            }) {
+                Some(event) if event.cancelled => {
+                    mob_entity.reset_love_ticks();
+                    mob_entity
+                        .breeding_cooldown
+                        .store(6000, std::sync::atomic::Ordering::Relaxed);
+                    mate.reset_love();
+                    mate.set_breeding_cooldown(6000);
+                    return;
+                }
+                Some(event) => event.experience,
+                None => experience,
+            }
+        } else {
+            experience
         };
 
         // Both parents' online breeders, vanilla's love causes.

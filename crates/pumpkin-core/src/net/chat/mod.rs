@@ -442,6 +442,19 @@ pub fn decorate_chat(
     format: &str,
     content: &str,
 ) -> pumpkin_util::text::TextComponent {
+    // Paper `AsyncChatDecorateEvent`: plugins may rewrite the message content
+    let decorated = player
+        .plugin_event(|player| {
+            crate::plugin::api::events::player::async_chat_decorate::AsyncChatDecorateEvent {
+                player,
+                original_message: content.to_string(),
+                result: content.to_string(),
+                cancelled: false,
+            }
+        })
+        .filter(|event| !event.cancelled)
+        .map(|event| event.result);
+    let content = decorated.as_deref().unwrap_or(content);
     let custom = player
         .display_name
         .lock()

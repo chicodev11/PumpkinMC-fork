@@ -545,15 +545,26 @@ impl<S: CommandSource> CommandDispatcher<S> {
         // before either dispatcher gets a chance to run it.
         if self.is_disabled(Self::command_name(input)) {
             let reader = StringReader::new(input);
-            Self::send_error_to_source(source, Self::unknown_command_error(&reader), input);
+            Self::send_command_error(source, Self::unknown_command_error(&reader), input);
             return;
         }
 
         let output = self.execute_input(input, source);
 
         if let Err(error) = output {
-            Self::send_error_to_source(source, error, input);
+            Self::send_command_error(source, error, input);
         }
+    }
+
+    /// [`Self::send_error_to_source`], letting the source change an unknown command's message.
+    fn send_command_error(source: &S, mut error: CommandSyntaxError, input: &str) {
+        if error.is(&DISPATCHER_UNKNOWN_COMMAND) {
+            match source.unknown_command(input, error.message.clone()) {
+                Some(message) => error.message = message,
+                None => return,
+            }
+        }
+        Self::send_error_to_source(source, error, input);
     }
 
     /// Sends a command error to the provided source.

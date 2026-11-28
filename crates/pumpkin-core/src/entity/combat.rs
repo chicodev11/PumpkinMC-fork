@@ -114,6 +114,24 @@ pub fn mace_smash_knockback(world: &World, attacker: &dyn EntityBase, victim: &d
             let push = direction.normalize() * power;
             let velocity = Vector3::new(push.x, f64::from(0.7f32), push.z);
             let entity = nearby.get_entity();
+            // Paper `EntityPushedByEntityAttackEvent`
+            let velocity = match world.get_entity_by_id(attacker.get_entity().entity_id).and_then(
+                |pusher| {
+                    world.plugin_event(|| {
+                        crate::plugin::api::events::entity::entity_pushed_by_entity_attack::EntityPushedByEntityAttackEvent {
+                            entity: nearby.clone(),
+                            pushed_by: pusher,
+                            cause: "ENTITY_ATTACK".to_string(),
+                            knockback: velocity,
+                            cancelled: false,
+                        }
+                    })
+                },
+            ) {
+                Some(event) if event.cancelled => continue,
+                Some(event) => event.knockback,
+                None => velocity,
+            };
             if let Some(player) = nearby.get_player() {
                 player.set_velocity(entity.velocity.load() + velocity);
             } else {

@@ -77,6 +77,22 @@ impl PhantomSpawner {
             );
             let mut group_data = None;
             for _ in 0..group_size {
+                // Paper `PhantomPreSpawnEvent`
+                if let Some(event) = world.plugin_event(|| {
+                    crate::plugin::api::events::entity::phantom_pre_spawn::PhantomPreSpawnEvent {
+                        location: pos,
+                        entity: player.clone(),
+                        should_abort_spawn: false,
+                        cancelled: false,
+                    }
+                }) {
+                    if event.should_abort_spawn {
+                        break;
+                    }
+                    if event.cancelled {
+                        continue;
+                    }
+                }
                 let phantom = from_type(&EntityType::PHANTOM, pos, world, Uuid::new_v4());
                 phantom.get_entity().set_rotation(0.0, 0.0);
                 group_data =

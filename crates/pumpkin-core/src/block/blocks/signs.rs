@@ -852,9 +852,26 @@ fn execute_click_commands_if_present(
                     player.get_display_name(),
                     server.clone(),
                 );
-                let command = command.strip_prefix('/').unwrap_or(command.as_ref());
+                let mut command = command
+                    .strip_prefix('/')
+                    .unwrap_or(command.as_ref())
+                    .to_string();
+                // Paper `PlayerSignCommandPreprocessEvent`
+                if let Some(event) = player.plugin_event(|player| {
+                    crate::plugin::api::events::player::player_sign_command_preprocess::PlayerSignCommandPreprocessEvent {
+                        player,
+                        message: format!("/{command}"),
+                        sign: *position,
+                        cancelled: false,
+                    }
+                }) {
+                    if event.cancelled {
+                        continue;
+                    }
+                    command = event.message.strip_prefix('/').unwrap_or(&event.message).to_string();
+                }
                 let dispatcher = server.command_dispatcher.load();
-                dispatcher.handle_command(&source, command);
+                dispatcher.handle_command(&source, &command);
             }
             ClickEvent::ShowDialog { dialog } => show_inline_dialog(player, &dialog),
             ClickEvent::Custom { id, payload } => {

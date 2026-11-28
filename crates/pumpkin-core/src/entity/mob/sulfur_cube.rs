@@ -557,6 +557,18 @@ impl SulfurCubeEntity {
         } else {
             explosion.fuse
         };
+        // Paper `EntityIgniteEvent`: change the fuse or cancel the priming
+        let fuse = match world.entity_event(entity.entity_id, |cube| {
+            crate::plugin::api::events::entity::entity_ignite::EntityIgniteEvent {
+                entity: cube,
+                fuse_time: fuse,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return false,
+            Some(event) => event.fuse_time,
+            None => fuse,
+        };
         entity.set_invulnerable(true);
         self.fuse.store(fuse, Ordering::Relaxed);
         entity.set_synced_data(tracked_data::sulfur_cube::MAX_FUSE, fuse);
@@ -1144,8 +1156,28 @@ impl Mob for SulfurCubeEntity {
             }
 
             if is_swallowable_item(item_stack) {
-                let equipped = self.equip_item(item_stack);
-                if equipped {
+                // Paper `SulfurCubeSwallowItemEvent`: a changed item is swallowed instead and
+                // the player keeps theirs
+                let original = item_stack.copy_with_count(1);
+                let (swallow, keep_original) = match self
+                    .get_entity()
+                    .world
+                    .load()
+                    .entity_event(self.get_entity().entity_id, |cube| {
+                        crate::plugin::api::events::entity::sulfur_cube_swallow_item::SulfurCubeSwallowItemEvent {
+                            sulfur_cube: cube,
+                            player: player.clone(),
+                            old_item: original.clone(),
+                            new_item: original.clone(),
+                            cancelled: false,
+                        }
+                    }) {
+                    Some(event) if event.cancelled => return false,
+                    Some(event) if !event.new_item.are_equal(&original) => (event.new_item, true),
+                    _ => (original, false),
+                };
+                let equipped = self.equip_item(&swallow);
+                if equipped && !keep_original {
                     item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                     self.get_entity().world.load().emit_game_event(
                         GameEvent::EntityInteract.name(),

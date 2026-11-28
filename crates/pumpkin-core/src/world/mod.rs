@@ -689,6 +689,19 @@ impl World {
             players
                 .iter()
                 .filter(|player| spectators_generate_chunks || !player.is_spectator())
+                // Paper `PlayerNaturallySpawnCreaturesEvent`: a cancelled player's chunks do
+                // not count toward natural spawning
+                .filter(|player| {
+                    !self
+                        .plugin_event(|| {
+                            crate::plugin::api::events::player::player_naturally_spawn_creatures::PlayerNaturallySpawnCreaturesEvent {
+                                player: (*player).clone(),
+                                radius: 8,
+                                cancelled: false,
+                            }
+                        })
+                        .is_some_and(|event| event.cancelled)
+                })
                 .map(|player| player.get_entity().chunk_pos.load()),
         );
         for pos in migrations {
@@ -5312,6 +5325,23 @@ impl World {
         Some(event)
     }
 
+    /// Fires a plugin event about one entity of this world, built only when a plugin listens
+    /// and the entity is found.
+    pub fn entity_event<E: Payload + 'static>(
+        &self,
+        entity_id: i32,
+        event: impl FnOnce(Arc<dyn EntityBase>) -> E,
+    ) -> Option<E> {
+        let server = self.server.upgrade()?;
+        if !server.plugin_manager.has_handlers::<E>() {
+            return None;
+        }
+        let entity = self.get_entity_by_id(entity_id)?;
+        let mut event = event(entity);
+        server.plugin_manager.fire_blocking(&server, &mut event);
+        Some(event)
+    }
+
     /// Paper `Entity.setVisibleByDefault`: hides or shows the entity for every player that
     /// was not explicitly shown it.
     pub fn set_entity_visible_by_default(self: &Arc<Self>, entity: &Entity, visible: bool) {
@@ -5796,6 +5826,8 @@ impl World {
             // so the chunk of the old world is not recorded in the new world's sender
             if player.chunk_send_epoch.load(Ordering::Relaxed) == epoch {
                 sender.mark_sent_out_of_band(center_chunk);
+                drop(sender);
+                player.chunks_loaded_event(&[center_chunk]);
             }
         }
     }
@@ -6556,6 +6588,7 @@ impl World {
         );
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn break_block(
         self: &Arc<Self>,
         position: &BlockPos,
@@ -6608,6 +6641,30 @@ impl World {
             flags.insert(BlockFlags::SKIP_DROPS);
         }
 
+        // Paper `BlockDestroyEvent`: a block destroyed without a player (pistons, entities,
+        // physics, `/setblock destroy`)
+        let play_effect = if cause.is_none()
+            && let Some(event) = self.plugin_event(|| {
+                crate::plugin::api::events::block::block_destroy::BlockDestroyEvent {
+                    block: *position,
+                    will_drop: !flags.contains(BlockFlags::SKIP_DROPS),
+                    play_effect: true,
+                    cancelled: false,
+                }
+            }) {
+            if event.cancelled {
+                return None;
+            }
+            if event.will_drop {
+                flags.remove(BlockFlags::SKIP_DROPS);
+            } else {
+                flags.insert(BlockFlags::SKIP_DROPS);
+            }
+            event.play_effect
+        } else {
+            true
+        };
+
         let broken_block_state =
             crate::block::blocks::decorated_pot::DecoratedPotBlock::player_will_destroy(
                 self,
@@ -6649,7 +6706,9 @@ impl World {
         {
             entity.on_player_destroyed(self, broken_state_id, player, &tool);
         }
-        self.broadcast_destroy_block_particles(position, broken_state_id, new_state_id, cause);
+        if play_effect {
+            self.broadcast_destroy_block_particles(position, broken_state_id, new_state_id, cause);
+        }
 
         Some(broken_state_id)
     }

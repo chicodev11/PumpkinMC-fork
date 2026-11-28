@@ -168,7 +168,7 @@ impl Goal for TeleportTowardsPlayerGoal {
         if let Some(player) = target.get_player()
             && enderman.is_player_staring(player)
         {
-            if dist_sq < STARE_CLOSE_DISTANCE_SQ {
+            if dist_sq < STARE_CLOSE_DISTANCE_SQ && enderman.escape_allowed("STARE") {
                 enderman.teleport_randomly();
             }
             self.unseen_ticks = 0;

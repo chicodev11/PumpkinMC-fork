@@ -1,5 +1,5 @@
-use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
@@ -202,6 +202,22 @@ impl MoveControlTrait for CubeMobMoveControl {
     }
 }
 
+/// Fires a Paper slime event for this cube mob; `true` when a plugin cancelled it.
+fn slime_event_cancelled<E>(
+    cube: &dyn CubeMob,
+    event: impl FnOnce(Arc<dyn crate::entity::EntityBase>) -> E,
+) -> bool
+where
+    E: crate::plugin::api::events::Payload + crate::plugin::api::events::Cancellable + 'static,
+{
+    let entity = cube.get_entity();
+    entity
+        .world
+        .load()
+        .entity_event(entity.entity_id, event)
+        .is_some_and(|event| event.cancelled())
+}
+
 pub struct CubeMobFloatGoal {
     cube: Weak<dyn CubeMob>,
 }
@@ -218,7 +234,14 @@ impl Goal for CubeMobFloatGoal {
         let Some(cube) = self.cube.upgrade() else {
             return false;
         };
+        // Paper `SlimeSwimEvent`
         cube.get_entity().is_in_liquid()
+            && !slime_event_cancelled(cube.as_ref(), |slime| {
+                crate::plugin::api::events::entity::slime_swim::SlimeSwimEvent {
+                    slime,
+                    cancelled: false,
+                }
+            })
     }
 
     fn tick(&mut self, _mob: &dyn Mob) {
@@ -280,7 +303,20 @@ impl Goal for CubeMobRandomDirectionGoal {
         self.next_randomize_time -= 1;
         if self.next_randomize_time <= 0 {
             self.next_randomize_time = rand::random_range(40..100);
-            self.chosen_degrees = rand::random_range(0.0..360.0);
+            let degrees: f32 = rand::random_range(0.0..360.0);
+            // Paper `SlimeChangeDirectionEvent`
+            let entity = cube.get_entity();
+            match entity.world.load().entity_event(entity.entity_id, |slime| {
+                crate::plugin::api::events::entity::slime_change_direction::SlimeChangeDirectionEvent {
+                    slime,
+                    new_yaw: degrees,
+                    cancelled: false,
+                }
+            }) {
+                Some(event) if event.cancelled => return,
+                Some(event) => self.chosen_degrees = event.new_yaw,
+                None => self.chosen_degrees = degrees,
+            }
         }
         let data = cube.cube_data();
         data.target_yaw.store(self.chosen_degrees);
@@ -309,6 +345,12 @@ impl Goal for CubeMobKeepOnJumpingGoal {
             return false;
         };
         !cube.get_entity().has_vehicle()
+            && !slime_event_cancelled(cube.as_ref(), |slime| {
+                crate::plugin::api::events::entity::slime_wander::SlimeWanderEvent {
+                    slime,
+                    cancelled: false,
+                }
+            })
     }
 
     fn tick(&mut self, _mob: &dyn Mob) {

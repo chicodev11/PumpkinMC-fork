@@ -168,7 +168,14 @@ impl BedrockClient {
             .upsert(profile.id, profile.name.clone());
 
         let max_players = server.advanced_config.networking.bedrock.max_players;
-        if max_players > 0 && server.get_player_count() >= max_players as usize {
+        if crate::net::server_full_kick(
+            server,
+            &profile.name,
+            profile.id.to_string(),
+            max_players > 0 && server.get_player_count() >= max_players as usize,
+        )
+        .await
+        {
             self.kick(
                 DisconnectReason::ServerFull,
                 TextComponent::translate_cross(

@@ -346,7 +346,43 @@ pub trait FlowingFluid: Send + Sync {
             // Replace non-fluid blocks
             let block = world.get_block(pos);
             if block.id != Block::AIR.id {
-                world.break_block(pos, None, BlockFlags::NOTIFY_ALL);
+                // Paper `BlockBreakBlockEvent`: plugins may change what the washed-away block
+                // drops
+                let has_handlers = world.server.upgrade().is_some_and(|server| {
+                    server.plugin_manager.has_handlers::<
+                        crate::plugin::api::events::block::block_break_block::BlockBreakBlockEvent,
+                    >()
+                });
+                if has_handlers {
+                    let params = crate::world::loot::LootContextParameters {
+                        world: Some(world),
+                        block_state: Some(world.get_block_state(pos)),
+                        position: Some(pos.to_f64()),
+                        ..Default::default()
+                    };
+                    let drops = crate::block::collect_loot(world, block, pos, &params);
+                    let drops = world
+                        .plugin_event(|| {
+                            crate::plugin::api::events::block::block_break_block::BlockBreakBlockEvent {
+                                block: *pos,
+                                source: *pos,
+                                drops,
+                            }
+                        })
+                        .map(|event| event.drops)
+                        .unwrap_or_default();
+                    if world
+                        .break_block(pos, None, BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS)
+                        .is_some()
+                    {
+                        for stack in drops {
+                            world.drop_stack(pos, stack);
+                        }
+                        crate::block::spawn_after_break(world, block, pos, true, false);
+                    }
+                } else {
+                    world.break_block(pos, None, BlockFlags::NOTIFY_ALL);
+                }
             }
         }
 

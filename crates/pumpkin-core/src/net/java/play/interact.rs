@@ -164,6 +164,21 @@ impl JavaClient {
             }}
         } else {
             // Entity not found
+            // Paper `PlayerUseUnknownEntityEvent` (fake entities a plugin showed the player)
+            player.plugin_event(|player| {
+                crate::plugin::api::events::player::player_use_unknown_entity::PlayerUseUnknownEntityEvent {
+                    player,
+                    entity_id: entity_id.0,
+                    attack: action == ActionType::Attack,
+                    hand: if interact.hand.map_or(0, |hand| hand.0) == 0 {
+                        "HAND"
+                    } else {
+                        "OFF_HAND"
+                    }
+                    .to_string(),
+                    clicked_position: interact.target_position,
+                }
+            });
             send_cancellable_blocking! {{
                 server;
                 PlayerInteractUnknownEntityEvent::new(player, entity_id.0, action);

@@ -834,6 +834,281 @@ pub fn cleanup_event(event: &Event, state: &mut PluginHostState) {
             cleanup_world(state, &data.event_world);
         }
         Event::ServerResourcesReloadedEvent(_) => {}
+        Event::PlayerBedFailEnterEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerShearBlockEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+            for i in &data.drops {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::EntityConstructEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::EntityCompostItemEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::CompostItemEvent(data) => {
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::PlayerTeleportEndGatewayEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::EntityTeleportEndGatewayEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::PlayerLecternPageChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.book);
+        }
+        Event::PlayerInsertLecternBookEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.book);
+        }
+        Event::PlayerSignCommandPreprocessEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PreSpawnerSpawnEvent(_) => {}
+        Event::BlockBreakBlockEvent(data) => {
+            for i in &data.drops {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::AsyncPlayerSendCommandsEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::StructuresLocateEvent(data) => {
+            cleanup_world(state, &data.event_world);
+        }
+        Event::WhitelistToggleEvent(_) => {}
+        Event::WhitelistStateUpdateEvent(_) => {}
+        Event::WorldBorderBoundsChangeEvent(data) => {
+            cleanup_world(state, &data.event_world);
+        }
+        Event::WorldBorderCenterChangeEvent(data) => {
+            cleanup_world(state, &data.event_world);
+        }
+        Event::UnknownCommandEvent(data) => {
+            if let Some(p) = &data.player {
+                cleanup_player(state, p);
+            }
+        }
+        Event::PlayerToggleEntityAgeLockEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_entity(state, &data.entity);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::ItemTransportingEntityValidateTargetEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::EntityFertilizeEggEvent(data) => {
+            if let Some(p) = &data.breeder {
+                cleanup_player(state, p);
+            }
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.father);
+        }
+        Event::EnderDragonFlameEvent(data) => {
+            cleanup_entity(state, &data.dragon);
+            cleanup_entity(state, &data.area_effect_cloud);
+        }
+        Event::EnderDragonShootFireballEvent(data) => {
+            cleanup_entity(state, &data.dragon);
+            cleanup_entity(state, &data.fireball);
+        }
+        Event::EntityPushedByEntityAttackEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.pushed_by);
+        }
+        Event::PlayerAttemptPickupItemEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::EntityAttemptSpinAttackEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.target);
+        }
+        Event::EntityEquipmentChangedEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            for i in &data.new_items {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::EntityCollideWithEntityEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.collided);
+        }
+        Event::TameableDeathMessageEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::EntityEffectTickEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::EntityDamageItemEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::SlimeSwimEvent(data) => {
+            cleanup_entity(state, &data.slime);
+        }
+        Event::SlimeChangeDirectionEvent(data) => {
+            cleanup_entity(state, &data.slime);
+        }
+        Event::SlimeWanderEvent(data) => {
+            cleanup_entity(state, &data.slime);
+        }
+        Event::EndermanEscapeEvent(data) => {
+            cleanup_entity(state, &data.enderman);
+        }
+        Event::ShulkerDuplicateEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.parent);
+        }
+        Event::SlimeTargetLivingEntityEvent(data) => {
+            cleanup_entity(state, &data.slime);
+            cleanup_entity(state, &data.target);
+        }
+        Event::EntityIgniteEvent(data) => {
+            cleanup_entity(state, &data.entity);
+        }
+        Event::SulfurCubeSwallowItemEvent(data) => {
+            cleanup_entity(state, &data.sulfur_cube);
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.old_item);
+            cleanup_item_stack(state, &data.new_item);
+        }
+        Event::WitchThrowPotionEvent(data) => {
+            cleanup_entity(state, &data.witch);
+            cleanup_entity(state, &data.target);
+            if let Some(i) = &data.potion {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::WitchConsumePotionEvent(data) => {
+            cleanup_entity(state, &data.witch);
+            if let Some(i) = &data.potion {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::WitchReadyPotionEvent(data) => {
+            cleanup_entity(state, &data.witch);
+            if let Some(i) = &data.potion {
+                cleanup_item_stack(state, i);
+            }
+        }
+        Event::EntityPortalReadyEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_world(state, &data.target_world);
+        }
+        Event::TurtleLayEggEvent(data) => {
+            cleanup_entity(state, &data.turtle);
+        }
+        Event::TurtleStartDiggingEvent(data) => {
+            cleanup_entity(state, &data.turtle);
+        }
+        Event::TurtleGoHomeEvent(data) => {
+            cleanup_entity(state, &data.turtle);
+        }
+        Event::EntityZapEvent(data) => {
+            cleanup_entity(state, &data.entity);
+            cleanup_entity(state, &data.bolt);
+        }
+        Event::EntityAttemptSmashAttackEvent(data) => {
+            cleanup_player(state, &data.entity);
+            cleanup_entity(state, &data.target);
+            cleanup_item_stack(state, &data.weapon);
+        }
+        Event::PlayerSetSpawnEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerClientLoadedWorldEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerChunkLoadEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerChunkUnloadEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::BlockLockCheckEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.item);
+        }
+        Event::PlayerInventorySlotChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.old_item);
+            cleanup_item_stack(state, &data.new_item);
+        }
+        Event::ItemCraftedEvent(data) => {
+            cleanup_player(state, &data.player);
+            cleanup_item_stack(state, &data.crafted_item);
+        }
+        Event::PlayerLoomPatternSelectEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerStonecutterRecipeSelectEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerAdvancementCriterionGrantEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::EnderDragonFireballHitEvent(data) => {
+            cleanup_entity(state, &data.fireball);
+            for e in &data.targets {
+                cleanup_entity(state, e);
+            }
+            cleanup_entity(state, &data.area_effect_cloud);
+        }
+        Event::FishHookStateChangeEvent(data) => {
+            cleanup_entity(state, &data.hook);
+        }
+        Event::WaterBottleSplashEvent(data) => {
+            cleanup_entity(state, &data.potion);
+            for e in &data.to_damage {
+                cleanup_entity(state, e);
+            }
+        }
+        Event::AsyncChatDecorateEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerHandshakeEvent(_) => {}
+        Event::PlayerConnectionInitialConfigureEvent(_) => {}
+        Event::PlayerConnectionValidateLoginEvent(_) => {}
+        Event::AsyncPlayerConnectionConfigureEvent(_) => {}
+        Event::AsyncTabCompleteEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::TabCompleteEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::AsyncPlayerSendSuggestionsEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerUseUnknownEntityEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerChangeBeaconEffectEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::UncheckedSignChangeEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::PlayerServerFullCheckEvent(_) => {}
+        Event::ProfileWhitelistVerifyEvent(_) => {}
+        Event::RemoteServerCommandEvent(_) => {}
+        Event::PluginEnableEvent(_) => {}
+        Event::PluginDisableEvent(_) => {}
+        Event::PlayerNaturallySpawnCreaturesEvent(data) => {
+            cleanup_player(state, &data.player);
+        }
+        Event::BlockDestroyEvent(_) => {}
+        Event::PreCreatureSpawnEvent(_) => {}
+        Event::PhantomPreSpawnEvent(data) => {
+            cleanup_player(state, &data.entity);
+        }
         Event::EntityAddToWorldEvent(data) => {
             cleanup_entity(state, &data.entity);
             cleanup_world(state, &data.entity_world);

@@ -679,6 +679,13 @@ impl PluginManager {
 
                     info!("Loaded {} ({})", metadata.name, metadata.version);
 
+                    // Paper `PluginEnableEvent`
+                    let mut event =
+                        crate::plugin::api::events::server::plugin_enable::PluginEnableEvent {
+                            plugin_name: plugin_name.clone(),
+                        };
+                    self_ref_clone.fire(&context.server, &mut event).await;
+
                     if !metadata.permissions.is_empty() {
                         warn!(
                             "Plugin \"{}\" uses the following permissions: {:?}",
@@ -1183,6 +1190,11 @@ impl PluginManager {
             plugins.remove(index)
         };
 
+        // Paper `PluginDisableEvent`
+        let mut event = crate::plugin::api::events::server::plugin_disable::PluginDisableEvent {
+            plugin_name: name.to_string(),
+        };
+        self.fire(&plugin.context.server, &mut event).await;
         self.unregister_handlers(name);
         self.java_versions.unregister(name);
         self.bedrock_versions.unregister(name);

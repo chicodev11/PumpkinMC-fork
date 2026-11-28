@@ -283,11 +283,19 @@ impl ScreenHandler for StonecutterScreenHandler {
         self
     }
 
-    fn on_button_click(&mut self, _player: &dyn InventoryPlayer, button_id: i32) -> bool {
+    fn on_button_click(&mut self, player: &dyn InventoryPlayer, button_id: i32) -> bool {
         if self.state.selected_recipe_index.load(Ordering::Relaxed) == button_id {
             return false;
         }
         if self.state.is_valid_recipe_index(button_id) {
+            let recipes = self.state.recipes_for_input();
+            let result = recipes[button_id as usize].stack.as_ref().map_or_else(
+                || recipes[button_id as usize].result_id.clone(),
+                |stack| stack.item.registry_key.to_string(),
+            );
+            if !player.stonecutter_recipe_select(&result) {
+                return false;
+            }
             self.state
                 .selected_recipe_index
                 .store(button_id, Ordering::Relaxed);

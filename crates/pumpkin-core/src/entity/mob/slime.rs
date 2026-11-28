@@ -391,7 +391,22 @@ impl SlimeAttackGoal {
 
 impl Goal for SlimeAttackGoal {
     fn can_start(&mut self, mob: &dyn Mob) -> bool {
-        mob.get_mob_entity().get_target().is_some()
+        // Paper `SlimeTargetLivingEntityEvent`
+        let Some(target) = mob.get_mob_entity().get_target() else {
+            return false;
+        };
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        !entity
+            .world
+            .load()
+            .entity_event(entity.entity_id, |slime| {
+                crate::plugin::api::events::entity::slime_target_living_entity::SlimeTargetLivingEntityEvent {
+                    slime,
+                    target: target.clone(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
     }
 
     fn start(&mut self, _mob: &dyn Mob) {

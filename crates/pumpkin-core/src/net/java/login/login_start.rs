@@ -19,7 +19,14 @@ impl PendingConnection {
         self.login_started = true;
 
         let max_players = server.advanced_config.networking.java.max_players;
-        if max_players > 0 && server.get_player_count() >= max_players as usize {
+        if crate::net::server_full_kick(
+            server,
+            &login_start.name,
+            login_start.uuid.to_string(),
+            max_players > 0 && server.get_player_count() >= max_players as usize,
+        )
+        .await
+        {
             self.kick(TextComponent::translate_cross(
                 translation::java::MULTIPLAYER_DISCONNECT_SERVER_FULL,
                 translation::bedrock::DISCONNECTIONSCREEN_SERVERFULL,

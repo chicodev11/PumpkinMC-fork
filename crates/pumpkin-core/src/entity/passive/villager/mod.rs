@@ -1908,6 +1908,22 @@ impl Mob for VillagerEntity {
         lightning: &crate::entity::lightning::LightningBoltEntity,
     ) {
         let world = self.get_entity().world.load_full();
+        // Paper `EntityZapEvent` (fired only when the villager would turn into a witch)
+        if world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+            && let Some(bolt) = world.get_entity_by_id(lightning.get_entity().entity_id)
+            && world
+                .entity_event(self.get_entity().entity_id, |entity| {
+                    crate::plugin::api::events::entity::entity_zap::EntityZapEvent {
+                        entity,
+                        bolt,
+                        replacement_type: "minecraft:witch".to_string(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+        {
+            return;
+        }
         let converted = (world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful)
             .then(|| {
                 convert_to(

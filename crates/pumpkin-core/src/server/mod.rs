@@ -1630,28 +1630,6 @@ impl Server {
             );
         self.plugin_manager.fire(self, &mut service_event).await;
     }
-
-    pub async fn tab_complete(self: &Arc<Self>, buffer: String, completions: Vec<String>) {
-        let mut tab_event = crate::plugin::api::events::server::tab_complete::TabCompleteEvent::new(
-            buffer,
-            completions,
-        );
-        self.plugin_manager.fire(self, &mut tab_event).await;
-    }
-
-    pub async fn enable_plugin(self: &Arc<Self>, plugin_name: String) {
-        let mut enable_event =
-            crate::plugin::api::events::server::plugin_enable::PluginEnableEvent::new(plugin_name);
-        self.plugin_manager.fire(self, &mut enable_event).await;
-    }
-
-    pub async fn disable_plugin(self: &Arc<Self>, plugin_name: String) {
-        let mut disable_event =
-            crate::plugin::api::events::server::plugin_disable::PluginDisableEvent::new(
-                plugin_name,
-            );
-        self.plugin_manager.fire(self, &mut disable_event).await;
-    }
 }
 
 /// A generator for `Server::create_world_with_generator`.

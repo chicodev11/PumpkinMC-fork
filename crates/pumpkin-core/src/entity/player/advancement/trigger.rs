@@ -214,6 +214,39 @@ impl Player {
                 return;
             };
 
+            // Paper `PlayerAdvancementCriterionGrantEvent`: fired outside the advancement lock
+            // (a handler may read advancements), then the lock is taken again to award
+            let has_handlers = player.world().server.upgrade().is_some_and(|server| {
+                server.plugin_manager.has_handlers::<
+                    crate::plugin::api::events::player::player_advancement_criterion_grant::PlayerAdvancementCriterionGrantEvent,
+                >()
+            });
+            let matched = if has_handlers {
+                drop(adv);
+                let matched: Vec<_> = matched
+                    .into_iter()
+                    .filter(|(advancement, criterion)| {
+                        !player
+                            .plugin_event(|player| {
+                                crate::plugin::api::events::player::player_advancement_criterion_grant::PlayerAdvancementCriterionGrantEvent {
+                                    player,
+                                    advancement: advancement.id.to_string(),
+                                    criterion: (*criterion).to_string(),
+                                    cancelled: false,
+                                }
+                            })
+                            .is_some_and(|event| event.cancelled)
+                    })
+                    .collect();
+                let Ok(relocked) = self.advancements.try_lock() else {
+                    return;
+                };
+                adv = relocked;
+                matched
+            } else {
+                matched
+            };
+
             let mut awards = Vec::with_capacity(matched.len());
             for (advancement, criterion) in matched {
                 let award = adv.award(advancement, criterion);

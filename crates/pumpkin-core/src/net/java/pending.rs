@@ -577,6 +577,14 @@ impl PendingConnection {
             id if id
                 == pumpkin_protocol::java::server::login::SLoginAcknowledged::to_id(version) =>
             {
+                // Paper `PlayerConnectionInitialConfigureEvent`
+                self.connection_event(server, |name, uuid| {
+                    crate::plugin::api::events::player::player_connection_initial_configure::PlayerConnectionInitialConfigureEvent {
+                        name,
+                        uuid,
+                    }
+                })
+                .await;
                 Ok(self.handle_login_acknowledged(server).await)
             }
             _ => Err(ReadingError::Message(format!(
@@ -584,6 +592,21 @@ impl PendingConnection {
                 packet.id
             ))),
         }
+    }
+
+    /// Fires a connection event with the profile's name and uuid when a plugin listens to it.
+    async fn connection_event<E: crate::plugin::api::events::Payload + Send + Sync + 'static>(
+        &self,
+        server: &Arc<Server>,
+        event: impl FnOnce(String, String) -> E,
+    ) -> Option<E> {
+        if !server.plugin_manager.has_handlers::<E>() {
+            return None;
+        }
+        let profile = self.gameprofile.as_ref()?;
+        let mut event = event(profile.name.clone(), profile.id.to_string());
+        server.plugin_manager.fire(server, &mut event).await;
+        Some(event)
     }
 
     async fn handle_config_packet(
@@ -615,7 +638,24 @@ impl PendingConnection {
                 };
                 let config = self.config.clone().unwrap_or_default();
                 self.connection_state.store(ConnectionState::Play);
-                if let Some(reason) = can_not_join(&profile, &self.address, server).await {
+                let mut reason = can_not_join(&profile, &self.address, server).await;
+                // Paper `PlayerConnectionValidateLoginEvent`
+                if let Some(event) = self
+                    .connection_event(server, |name, uuid| {
+                        crate::plugin::api::events::player::player_connection_validate_login::PlayerConnectionValidateLoginEvent {
+                            name,
+                            uuid,
+                            kick_message: reason.clone().map(TextComponent::get_text),
+                        }
+                    })
+                    .await
+                {
+                    let original = reason.clone().map(TextComponent::get_text);
+                    if event.kick_message != original {
+                        reason = event.kick_message.map(TextComponent::text);
+                    }
+                }
+                if let Some(reason) = reason {
                     self.kick(reason).await;
                     Ok(Some(PacketHandlerResult::Stop))
                 } else {
@@ -623,6 +663,15 @@ impl PendingConnection {
                 }
             }
             id if id == SKnownPacks::to_id(version) => {
+                // Paper `AsyncPlayerConnectionConfigureEvent`: configuration finishes once the
+                // handlers ran
+                self.connection_event(server, |name, uuid| {
+                    crate::plugin::api::events::player::async_player_connection_configure::AsyncPlayerConnectionConfigureEvent {
+                        name,
+                        uuid,
+                    }
+                })
+                .await;
                 self.handle_known_packs(server).await;
                 Ok(None)
             }

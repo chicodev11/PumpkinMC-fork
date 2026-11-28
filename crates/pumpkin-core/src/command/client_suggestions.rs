@@ -142,6 +142,40 @@ pub fn send_c_commands_packet(
     }
 
     let root_node_index = ROOT_NODE_ID.0.get() - 1;
+
+    // Paper `AsyncPlayerSendCommandsEvent`: plugins may hide root commands from the client
+    let root_names = |nodes: &[ProtoNode]| -> Vec<String> {
+        if !matches!(nodes[root_node_index].node_type, ProtoNodeType::Root) {
+            return Vec::new();
+        }
+        nodes[root_node_index]
+            .children
+            .iter()
+            .filter_map(|child| match nodes.get(child.0 as usize)?.node_type {
+                ProtoNodeType::Literal { name, .. } => Some(name.to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    if let Some(event) = player.plugin_event(|player| {
+        crate::plugin::api::events::player::async_player_send_commands::AsyncPlayerSendCommandsEvent {
+            player,
+            commands: root_names(&proto_nodes),
+        }
+    }) {
+        let kept: std::collections::HashSet<String> = event.commands.into_iter().collect();
+        let children: Box<[VarInt]> = proto_nodes[root_node_index]
+            .children
+            .iter()
+            .copied()
+            .filter(|child| match proto_nodes.get(child.0 as usize).map(|node| &node.node_type) {
+                Some(ProtoNodeType::Literal { name, .. }) => kept.contains(*name),
+                _ => true,
+            })
+            .collect();
+        proto_nodes[root_node_index].children = children;
+    }
+
     let packet = CCommands::new(proto_nodes.into(), VarInt(root_node_index as i32));
     player.try_send_client_packet(&packet);
 }

@@ -689,16 +689,41 @@ impl TurtleLayEggGoal {
         properties.eggs = turtle
             .get_random()
             .random_range(TurtleEggBlock::MIN_EGGS..=TurtleEggBlock::MAX_EGGS);
-        let egg_state = properties.to_state_id(&Block::TURTLE_EGG);
-        world.set_block_state(&egg_pos, egg_state, BlockFlags::NOTIFY_ALL);
-        let source: &dyn EntityBase = turtle;
-        world.emit_game_event_with_context(
-            GameEvent::BlockPlace.name(),
-            egg_pos.to_centered_f64(),
-            &GameEventContext {
-                source_entity: Some(source),
-            },
-        );
+        // Paper `TurtleLayEggEvent`: change the egg count, or cancel to lay none
+        let lay = match world.entity_event(entity.entity_id, |turtle| {
+            crate::plugin::api::events::entity::turtle_lay_egg::TurtleLayEggEvent {
+                turtle,
+                location: egg_pos,
+                egg_count: i32::from(properties.eggs),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled || event.egg_count < 1 => false,
+            Some(event) => {
+                properties.eggs = event
+                    .egg_count
+                    .clamp(
+                        i32::from(TurtleEggBlock::MIN_EGGS),
+                        i32::from(TurtleEggBlock::MAX_EGGS),
+                    )
+                    .try_into()
+                    .unwrap_or(properties.eggs);
+                true
+            }
+            None => true,
+        };
+        if lay {
+            let egg_state = properties.to_state_id(&Block::TURTLE_EGG);
+            world.set_block_state(&egg_pos, egg_state, BlockFlags::NOTIFY_ALL);
+            let source: &dyn EntityBase = turtle;
+            world.emit_game_event_with_context(
+                GameEvent::BlockPlace.name(),
+                egg_pos.to_centered_f64(),
+                &GameEventContext {
+                    source_entity: Some(source),
+                },
+            );
+        }
         turtle.set_has_egg(false);
         turtle.set_laying_egg(false);
         turtle
@@ -739,7 +764,20 @@ impl Goal for TurtleLayEggGoal {
         }
         let counter = turtle.lay_egg_counter.load(Ordering::Relaxed);
         if counter < 1 {
-            turtle.set_laying_egg(true);
+            // Paper `TurtleStartDiggingEvent`
+            let entity = turtle.get_entity();
+            let cancelled = entity
+                .world
+                .load()
+                .entity_event(entity.entity_id, |turtle_entity| {
+                    crate::plugin::api::events::entity::turtle_start_digging::TurtleStartDiggingEvent {
+                        turtle: turtle_entity,
+                        location: self.move_to_target_pos_goal.target_pos,
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled);
+            turtle.set_laying_egg(!cancelled);
         } else if counter > self.get_tick_count(LAY_EGG_TICKS) {
             self.lay_eggs(turtle);
         }
@@ -782,13 +820,26 @@ impl Goal for TurtleGoHomeGoal {
         if turtle.is_baby() {
             return false;
         }
-        if turtle.has_egg() {
-            return true;
+        let wants_home = turtle.has_egg()
+            || (mob
+                .get_random()
+                .random_range(0..to_goal_ticks(GO_HOME_CHANCE))
+                == 0
+                && !turtle.is_home_within(64.0));
+        // Paper `TurtleGoHomeEvent`
+        wants_home && {
+            let entity = turtle.get_entity();
+            !entity
+                .world
+                .load()
+                .entity_event(entity.entity_id, |turtle| {
+                    crate::plugin::api::events::entity::turtle_go_home::TurtleGoHomeEvent {
+                        turtle,
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
         }
-        mob.get_random()
-            .random_range(0..to_goal_ticks(GO_HOME_CHANCE))
-            == 0
-            && !turtle.is_home_within(64.0)
     }
 
     fn should_continue(&mut self, mob: &dyn Mob) -> bool {

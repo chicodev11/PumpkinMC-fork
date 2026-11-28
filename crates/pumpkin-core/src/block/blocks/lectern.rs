@@ -83,6 +83,38 @@ impl LecternController for LecternPageController {
         !self.world.fire_plugin_event(&mut event)
     }
 
+    fn page_change(
+        &self,
+        player: &dyn pumpkin_inventory::screen_handler::InventoryPlayer,
+        old: i32,
+        new: i32,
+    ) -> Option<i32> {
+        let Some(player) = player
+            .as_any()
+            .downcast_ref::<crate::entity::player::Player>()
+            .and_then(|player| self.world.get_player_by_id(player.entity_id()))
+        else {
+            return Some(new);
+        };
+        let page_count = self.entity().map_or(1, LecternBlockEntity::page_count);
+        // Paper `PlayerLecternPageChangeEvent`
+        match player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_lectern_page_change::PlayerLecternPageChangeEvent {
+                player,
+                lectern: self.position,
+                book: self.inventory.get_stack(0),
+                page_turn: if new < old { "LEFT" } else { "RIGHT" }.to_string(),
+                old_page: old,
+                new_page: new.clamp(0, (page_count - 1).max(0)),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => None,
+            Some(event) => Some(event.new_page),
+            None => Some(new),
+        }
+    }
+
     fn on_book_taken(&self) {
         if let Some(entity) = self.entity() {
             entity.page.store(0, Ordering::Relaxed);
@@ -248,7 +280,22 @@ impl BlockBehaviour for LecternBlock {
             return BlockActionResult::PassToDefaultBlockAction;
         };
 
-        let mut book = item_stack.split_unless_creative(args.player.gamemode.load(), 1);
+        // Paper `PlayerInsertLecternBookEvent`
+        let mut book = match args.player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_insert_lectern_book::PlayerInsertLecternBookEvent {
+                player,
+                block: *args.position,
+                book: item_stack.copy_with_count(1),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return BlockActionResult::Success,
+            Some(event) => {
+                let _ = item_stack.split_unless_creative(args.player.gamemode.load(), 1);
+                event.book
+            }
+            None => item_stack.split_unless_creative(args.player.gamemode.load(), 1),
+        };
         // Vanilla `LecternBlockEntity.resolveBook`: a written book is resolved with a source
         // at the lectern, with game master permissions, for the player who placed it.
         if let Some(server) = args.world.server.upgrade() {

@@ -334,14 +334,51 @@ impl ShulkerEntity {
         false
     }
 
-    pub fn on_shulker_damage(&self) {
-        let living = &self.mob_entity.living_entity;
-        let health = living.health.load();
-        let max = living.get_max_health();
-
-        if health < max * 0.5 && rand::rng().random_range(0..4) == 0 {
-            self.teleport_somewhere();
+    /// Vanilla `Shulker.hitByShulkerBullet`: an open shulker that manages to teleport leaves a
+    /// copy behind, less often the more shulkers are near.
+    fn hit_by_shulker_bullet(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let old_pos = entity.pos.load();
+        let old_box = entity.bounding_box.load();
+        if self.is_closed() || !self.teleport_somewhere() {
+            return;
         }
+        let world = entity.world.load_full();
+        let nearby = world
+            .get_entities_at_box(&old_box.expand(8.0, 8.0, 8.0))
+            .iter()
+            .filter(|other| {
+                other.get_entity().entity_type == &EntityType::SHULKER
+                    && other.get_entity().is_alive()
+            })
+            .count();
+        let fail_chance = (nearby as f32 - 1.0) / 5.0;
+        if rand::rng().random::<f32>() < fail_chance {
+            return;
+        }
+        let baby = crate::entity::r#type::from_type(
+            &EntityType::SHULKER,
+            old_pos,
+            &world,
+            uuid::Uuid::new_v4(),
+        );
+        if let Some(shulker) = baby.cast_any().downcast_ref::<Self>() {
+            shulker.set_color(self.get_color());
+        }
+        // Paper `ShulkerDuplicateEvent`
+        if world
+            .entity_event(entity.entity_id, |parent| {
+                crate::plugin::api::events::entity::shulker_duplicate::ShulkerDuplicateEvent {
+                    entity: baby.clone(),
+                    parent,
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+        {
+            return;
+        }
+        world.spawn_entity(baby);
     }
 }
 
@@ -395,8 +432,22 @@ impl Mob for ShulkerEntity {
         }
     }
 
-    fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
-        self.on_shulker_damage();
+    fn on_damage(&self, damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        // Vanilla `Shulker.hurtServer`: a hurt shulker below half health may teleport,
+        // otherwise a shulker bullet hit may duplicate it
+        let living = &self.mob_entity.living_entity;
+        if living.health.load() < living.get_max_health() * 0.5
+            && rand::rng().random_range(0..4) == 0
+        {
+            self.teleport_somewhere();
+        } else if {
+            let (names, _) = pumpkin_data::tag::DamageType::MINECRAFT_IS_PROJECTILE;
+            names.contains(&damage_type.message_id)
+        } && source
+            .is_some_and(|direct| direct.get_entity().entity_type == &EntityType::SHULKER_BULLET)
+        {
+            self.hit_by_shulker_bullet();
+        }
     }
 
     fn pre_damage(&self, damage_type: DamageType, _source: Option<&dyn EntityBase>) -> bool {

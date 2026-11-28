@@ -43,6 +43,9 @@ pub mod smith_item;
 /// Trade select event.
 pub mod trade_select;
 
+/// Item Crafted event.
+pub mod item_crafted;
+
 pub use brew::*;
 pub use brewing_stand_fuel::*;
 pub use craft_item::*;
@@ -57,6 +60,7 @@ pub use inventory_interact::*;
 pub use inventory_move_item::*;
 pub use inventory_open::*;
 pub use inventory_pickup_item::*;
+pub use item_crafted::*;
 pub use player_trade::*;
 pub use prepare_anvil::*;
 pub use prepare_grindstone::*;

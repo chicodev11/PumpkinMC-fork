@@ -4025,7 +4025,26 @@ impl Entity {
         };
         let mut should_remove = false;
         if let Some(portal_processor) = manager_guard.as_mut() {
-            if portal_processor.process_portal_teleportation(&self.world.load(), caller, true) {
+            if portal_processor.process_portal_teleportation(&self.world.load(), caller, true)
+                && !(portal_processor.portal_type == crate::world::portal::PortalType::Nether
+                    && self
+                        .world
+                        .load()
+                        .entity_event(self.entity_id, |entity| {
+                            // Paper `EntityPortalReadyEvent` (nether portals only, like Paper)
+                            crate::plugin::api::events::entity::entity_portal_ready::EntityPortalReadyEvent {
+                                entity,
+                                portal_type: "NETHER".to_string(),
+                                target_world: portal_processor.destination_world.clone(),
+                                cancelled: false,
+                            }
+                        })
+                        .is_some_and(|event| event.cancelled)
+                    && {
+                        portal_processor.portal_time = 0;
+                        true
+                    })
+            {
                 self.portal_cooldown
                     .store(self.default_portal_cooldown(), Ordering::Relaxed);
 

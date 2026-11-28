@@ -78,6 +78,12 @@ pub trait CommandSource: Clone + Send + Sync + 'static {
     /// Invokes callbacks for the command's return value.
     fn call_result(&self, _result: ReturnValue) {}
 
+    /// The message shown for an unknown command (Paper `UnknownCommandEvent`); `None` shows
+    /// nothing.
+    fn unknown_command(&self, _input: &str, message: TextComponent) -> Option<TextComponent> {
+        Some(message)
+    }
+
     /// Checks if this command source has the specified permission.
     fn has_permission(&self, _permission: &str) -> bool {
         true

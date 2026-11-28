@@ -166,14 +166,30 @@ impl RCONClient {
             ServerboundPacket::ExecCommand => {
                 if self.logged_in {
                     let output = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-                    let packet_body = packet.get_body().to_owned();
+                    let mut packet_body = packet.get_body().to_owned();
 
                     let command_source = CommandSender::Rcon(output.clone()).into_source(server);
 
-                    server
-                        .command_dispatcher
-                        .load()
-                        .handle_command(&command_source, &packet_body);
+                    // Paper `RemoteServerCommandEvent`
+                    let mut cancelled = false;
+                    if server.plugin_manager.has_handlers::<
+                        crate::plugin::api::events::server::remote_server_command::RemoteServerCommandEvent,
+                    >() {
+                        let mut event = crate::plugin::api::events::server::remote_server_command::RemoteServerCommandEvent {
+                            command: packet_body.clone(),
+                            cancelled: false,
+                        };
+                        server.plugin_manager.fire(server, &mut event).await;
+                        cancelled = event.cancelled;
+                        packet_body = event.command;
+                    }
+
+                    if !cancelled {
+                        server
+                            .command_dispatcher
+                            .load()
+                            .handle_command(&command_source, &packet_body);
+                    }
 
                     let output_lines: Vec<String> = output
                         .lock()

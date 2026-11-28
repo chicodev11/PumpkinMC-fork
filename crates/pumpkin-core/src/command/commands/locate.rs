@@ -200,6 +200,7 @@ fn send_success(
 struct LocateStructureExecutor;
 
 impl CommandExecutor for LocateStructureExecutor {
+    #[expect(clippy::too_many_lines)]
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let searched = context.get_argument::<ResourceOrTag>(ARG_STRUCTURE)?;
 
@@ -233,6 +234,38 @@ impl CommandExecutor for LocateStructureExecutor {
         }
 
         let origin = BlockPos::floored_v(context.source.position);
+        let mut search_radius = STRUCTURE_SEARCH_RADIUS;
+
+        // Paper `StructuresLocateEvent`: plugins may narrow the searched structures, change the
+        // radius or cancel the search
+        if let Some(event) = world.plugin_event(|| {
+            crate::plugin::api::events::world::structures_locate::StructuresLocateEvent {
+                world: world.clone(),
+                origin,
+                structures: scans
+                    .iter()
+                    .flat_map(|(_, keys)| keys.iter())
+                    .map(|key| format!("minecraft:{}", key.to_name()))
+                    .collect(),
+                radius: search_radius,
+                find_unexplored: false,
+                cancelled: false,
+            }
+        }) {
+            if event.cancelled {
+                return Err(STRUCTURE_NOT_FOUND_ERROR_TYPE
+                    .create_without_context(TextComponent::text(searched.printable())));
+            }
+            search_radius = event.radius.max(0);
+            for (_, keys) in &mut scans {
+                keys.retain(|key| {
+                    event.structures.iter().any(|name| {
+                        name.strip_prefix("minecraft:").unwrap_or(name) == key.to_name()
+                    })
+                });
+            }
+            scans.retain(|(_, keys)| !keys.is_empty());
+        }
 
         let mut found: Option<(BlockPos, StructureKeys)> = None;
         for (set_index, keys) in scans {
@@ -246,7 +279,7 @@ impl CommandExecutor for LocateStructureExecutor {
                         find_nearest_structure(
                             origin,
                             &[&set.placement],
-                            STRUCTURE_SEARCH_RADIUS,
+                            search_radius,
                             seed as i64,
                             global_cache,
                         )
@@ -263,13 +296,9 @@ impl CommandExecutor for LocateStructureExecutor {
                 // are only *possible* sites: the biome at a candidate can still
                 // reject every structure in the set. Resolving the start makes
                 // sure the reported position actually holds one, and says which.
-                StructurePlacementType::RandomSpread(_) => find_nearest_structure_start(
-                    origin,
-                    set,
-                    &keys,
-                    STRUCTURE_SEARCH_RADIUS,
-                    &world_gen,
-                ),
+                StructurePlacementType::RandomSpread(_) => {
+                    find_nearest_structure_start(origin, set, &keys, search_radius, &world_gen)
+                }
             };
 
             if let Some((pos, key)) = nearest

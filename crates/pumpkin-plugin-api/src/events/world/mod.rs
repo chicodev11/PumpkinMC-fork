@@ -44,6 +44,15 @@ pub mod world_difficulty_change;
 /// World Game Rule Change event.
 pub mod world_game_rule_change;
 
+/// Structures Locate event.
+pub mod structures_locate;
+
+/// World Border Bounds Change event.
+pub mod world_border_bounds_change;
+
+/// World Border Center Change event.
+pub mod world_border_center_change;
+
 pub use async_structure_generate::*;
 pub use async_structure_spawn::*;
 pub use chunk_load::*;
@@ -58,8 +67,11 @@ pub use lightning_strike::*;
 pub use loot_generate::*;
 pub use portal_create::*;
 pub use structure_grow::*;
+pub use structures_locate::*;
 pub use time_skip::*;
 pub use weather_change::*;
+pub use world_border_bounds_change::*;
+pub use world_border_center_change::*;
 pub use world_difficulty_change::*;
 pub use world_game_rule_change::*;
 pub use world_init::*;

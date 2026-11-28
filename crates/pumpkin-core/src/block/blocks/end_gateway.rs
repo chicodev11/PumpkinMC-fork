@@ -35,9 +35,40 @@ impl BlockBehaviour for EndGatewayBlock {
 
         end_gateway.trigger_cooldown(args.world, *args.position);
 
-        if let Some(destination) = end_gateway.get_portal_position(args.world, *args.position) {
+        if let Some(mut destination) = end_gateway.get_portal_position(args.world, *args.position) {
             let yaw = entity.yaw.load();
             let pitch = entity.pitch.load();
+            // Paper `PlayerTeleportEndGatewayEvent` / `EntityTeleportEndGatewayEvent`
+            let from = entity.pos.load();
+            if let Some(player) = args.entity.get_player() {
+                match player.plugin_event(|player| {
+                    crate::plugin::api::events::player::player_teleport_end_gateway::PlayerTeleportEndGatewayEvent {
+                        player,
+                        from,
+                        to: destination,
+                        gateway: *args.position,
+                        cancelled: false,
+                    }
+                }) {
+                    Some(event) if event.cancelled => return,
+                    Some(event) => destination = event.to,
+                    None => {}
+                }
+            } else {
+                match args.world.entity_event(entity.entity_id, |teleported| {
+                    crate::plugin::api::events::entity::entity_teleport_end_gateway::EntityTeleportEndGatewayEvent {
+                        entity: teleported,
+                        from,
+                        to: destination,
+                        gateway: *args.position,
+                        cancelled: false,
+                    }
+                }) {
+                    Some(event) if event.cancelled => return,
+                    Some(event) => destination = event.to,
+                    None => {}
+                }
+            }
             args.entity
                 .teleport(destination, Some(yaw), Some(pitch), args.world.clone());
         }

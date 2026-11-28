@@ -320,6 +320,20 @@ impl LivingEntity {
 
         if !entities.is_empty() {
             for entity in entities {
+                // Paper `EntityAttemptSpinAttackEvent`
+                if entity.get_living_entity().is_some()
+                    && world
+                        .entity_event(self.entity.entity_id, |attacker| {
+                            crate::plugin::api::events::entity::entity_attempt_spin_attack::EntityAttemptSpinAttackEvent {
+                                entity: attacker,
+                                target: entity.clone(),
+                                cancelled: false,
+                            }
+                        })
+                        .is_some_and(|event| event.cancelled)
+                {
+                    continue;
+                }
                 if entity.get_living_entity().is_some() {
                     if let Some(player) = caller.get_player() {
                         player.attack(&entity);
@@ -675,6 +689,22 @@ impl LivingEntity {
         if equipment.is_empty() {
             return;
         }
+        // Paper `EntityEquipmentChangedEvent`
+        self.entity
+            .world
+            .load()
+            .entity_event(self.entity.entity_id, |entity| {
+                crate::plugin::api::events::entity::entity_equipment_changed::EntityEquipmentChangedEvent {
+                    entity,
+                    slots: equipment
+                        .iter()
+                        .map(|(slot, _)| {
+                            crate::entity::player::Player::equipment_slot_name(slot).to_string()
+                        })
+                        .collect(),
+                    new_items: equipment.iter().map(|(_, stack)| stack.clone()).collect(),
+                }
+            });
         self.apply_and_send_equipment_attribute_modifiers(equipment);
 
         if equipment
@@ -2152,6 +2182,19 @@ impl LivingEntity {
         }
 
         for entity in pushable {
+            // Paper `EntityCollideWithEntityEvent`: a cancelled pair does not push
+            if world
+                .entity_event(self.entity.entity_id, |me| {
+                    crate::plugin::api::events::entity::entity_collide_with_entity::EntityCollideWithEntityEvent {
+                        entity: me,
+                        collided: entity.clone(),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                continue;
+            }
             let mob = dyn_self.get_mob();
             if let Some(mob) = mob {
                 mob.do_push(&entity);
@@ -3192,6 +3235,45 @@ impl LivingEntity {
                 }
             }
         } else if matches!(player_death_message, PlayerDeathMessage::NotAPlayer)
+            && show_death_messages
+            && [
+                &EntityType::WOLF,
+                &EntityType::CAT,
+                &EntityType::PARROT,
+                &EntityType::NAUTILUS,
+                &EntityType::ZOMBIE_NAUTILUS,
+            ]
+            .contains(&self.entity.entity_type)
+            && let Some(owner) = dyn_self
+                .get_mob()
+                .and_then(super::mob::Mob::get_owner_uuid)
+                .and_then(|uuid| world.server.upgrade()?.get_player_by_uuid(uuid))
+        {
+            // Vanilla `TamableAnimal.die`: the owner hears how their pet died, through Paper
+            // `TameableDeathMessageEvent`
+            let mut message = Self::get_death_message(dyn_self, damage_type, source, cause);
+            match world.entity_event(self.entity.entity_id, |pet| {
+                crate::plugin::api::events::entity::tameable_death_message::TameableDeathMessageEvent {
+                    entity: pet,
+                    death_message: message.clone().get_text(),
+                    cancelled: false,
+                }
+            }) {
+                Some(event) if event.cancelled => return,
+                Some(event) if event.death_message != message.clone().get_text() => {
+                    message = TextComponent::text(event.death_message);
+                }
+                _ => {}
+            }
+            owner.send_system_message(&message);
+            if self.entity.custom_name.load().is_some() {
+                tracing::info!(
+                    "Named entity {} died: {}",
+                    dyn_self.get_display_name().to_pretty_console(),
+                    message.to_pretty_console()
+                );
+            }
+        } else if matches!(player_death_message, PlayerDeathMessage::NotAPlayer)
             && self.entity.custom_name.load().is_some()
         {
             let death_message = Self::get_death_message(dyn_self, damage_type, source, cause);
@@ -3332,7 +3414,7 @@ impl LivingEntity {
                 if let Some(mob_effect) = crate::entity::effect::get_mob_effect(effect.effect_type)
                     && mob_effect.should_apply_effect_tick(tick_duration, effect.amplifier)
                 {
-                    effects_to_apply.push((mob_effect, effect.amplifier));
+                    effects_to_apply.push((mob_effect, effect.amplifier, effect.effect_type));
                 }
 
                 if effect.duration != -1 {
@@ -3346,7 +3428,24 @@ impl LivingEntity {
             self.remove_effect(effect_type);
         }
 
-        for (mob_effect, amplifier) in effects_to_apply {
+        for (mob_effect, amplifier, effect_type) in effects_to_apply {
+            // Paper `EntityEffectTickEvent`
+            if self
+                .entity
+                .world
+                .load()
+                .entity_event(self.entity.entity_id, |entity| {
+                    crate::plugin::api::events::entity::entity_effect_tick::EntityEffectTickEvent {
+                        entity,
+                        effect_type: effect_type.minecraft_name.to_string(),
+                        amplifier: i32::from(amplifier),
+                        cancelled: false,
+                    }
+                })
+                .is_some_and(|event| event.cancelled)
+            {
+                continue;
+            }
             mob_effect.apply_effect_tick(self, amplifier);
         }
     }
@@ -3461,6 +3560,22 @@ impl LivingEntity {
                 player.damage_item_in_slot(slot, durability_damage);
                 continue;
             }
+            // Paper `EntityDamageItemEvent` (players use `PlayerItemDamageEvent`)
+            let durability_damage = match self.entity.world.load().entity_event(
+                self.entity.entity_id,
+                |entity| {
+                    crate::plugin::api::events::entity::entity_damage_item::EntityDamageItemEvent {
+                        entity,
+                        item: stack.clone(),
+                        damage: durability_damage,
+                        cancelled: false,
+                    }
+                },
+            ) {
+                Some(event) if event.cancelled => continue,
+                Some(event) => event.damage,
+                None => durability_damage,
+            };
             let result = stack.damage_item(durability_damage);
             if result == DamageResult::Untouched {
                 continue;

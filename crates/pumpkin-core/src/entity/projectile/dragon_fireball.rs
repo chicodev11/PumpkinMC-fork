@@ -148,6 +148,35 @@ impl EntityBase for DragonFireballEntity {
         let cloud_entity = Entity::new(world.clone(), cloud_pos, &EntityType::AREA_EFFECT_CLOUD);
         let cloud = AreaEffectCloudEntity::create_dragon_breath(cloud_entity, living_owner);
 
+        // Paper `EnderDragonFireballHitEvent`: the living entities in the splash range
+        if let Some(server) = world.server.upgrade()
+            && server.plugin_manager.has_handlers::<
+                crate::plugin::api::events::entity::ender_dragon_fireball_hit::EnderDragonFireballHitEvent,
+            >()
+            && let Some(fireball) = world.get_entity_by_id(entity.entity_id)
+        {
+            let mut targets: Vec<Arc<dyn EntityBase>> = world
+                .get_entities_at_box(&search_box)
+                .into_iter()
+                .filter(|e| e.get_living_entity().is_some())
+                .collect();
+            for player in world.get_players_at_box(&search_box) {
+                targets.push(player as Arc<dyn EntityBase>);
+            }
+            let cloud_arc: Arc<dyn EntityBase> = cloud.clone();
+            let mut event =
+                crate::plugin::api::events::entity::ender_dragon_fireball_hit::EnderDragonFireballHitEvent {
+                    fireball,
+                    targets,
+                    area_effect_cloud: cloud_arc,
+                    cancelled: false,
+                };
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                return;
+            }
+        }
+
         let splash_data = if entity.is_silent() { -1 } else { 1 };
         world.sync_world_event(
             WorldEvent::ParticlesDragonFireballSplash,

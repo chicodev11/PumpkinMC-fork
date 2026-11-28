@@ -62,6 +62,43 @@ pub fn kick_non_whitelisted_players(server: &Server) {
     }
 }
 
+/// Paper `WhitelistToggleEvent`
+fn whitelist_toggled(server: &std::sync::Arc<Server>, enabled: bool) {
+    use crate::plugin::api::events::server::whitelist_toggle::WhitelistToggleEvent;
+    if server.plugin_manager.has_handlers::<WhitelistToggleEvent>() {
+        let mut event = WhitelistToggleEvent { enabled };
+        server.plugin_manager.fire_blocking(server, &mut event);
+    }
+}
+
+/// Paper `WhitelistStateUpdateEvent`: the ids of the profiles plugins kept off (or on) the list.
+fn state_update_cancelled<'a>(
+    server: &std::sync::Arc<Server>,
+    profiles: impl Iterator<Item = (&'a uuid::Uuid, &'a String)>,
+    status: &str,
+) -> Vec<uuid::Uuid> {
+    use crate::plugin::api::events::server::whitelist_state_update::WhitelistStateUpdateEvent;
+    if !server
+        .plugin_manager
+        .has_handlers::<WhitelistStateUpdateEvent>()
+    {
+        return Vec::new();
+    }
+    profiles
+        .filter(|(id, name)| {
+            let mut event = WhitelistStateUpdateEvent {
+                name: (*name).clone(),
+                uuid: id.to_string(),
+                status: status.to_string(),
+                cancelled: false,
+            };
+            server.plugin_manager.fire_blocking(server, &mut event);
+            event.cancelled
+        })
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 struct OnExecutor;
 
 impl CommandExecutor for OnExecutor {
@@ -71,6 +108,7 @@ impl CommandExecutor for OnExecutor {
         if previous {
             Err(ERROR_ALREADY_ON.create_without_context())
         } else {
+            whitelist_toggled(server, true);
             context.source.send_feedback(
                 pumpkin_macros::translate_cross!(
                     translation::java::COMMANDS_WHITELIST_ENABLED,
@@ -91,6 +129,7 @@ impl CommandExecutor for OffExecutor {
         let server = context.source.server();
         let previous = server.white_list.swap(false, Ordering::Relaxed);
         if previous {
+            whitelist_toggled(server, false);
             context.source.send_feedback(
                 pumpkin_macros::translate_cross!(
                     translation::java::COMMANDS_WHITELIST_DISABLED,
@@ -190,6 +229,24 @@ impl CommandExecutor for AddExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let targets = GameProfileArgumentType::get(context, "targets")?;
         let server = context.source.server();
+        let new_profiles: Vec<_> = {
+            let whitelist = server.data.whitelist_config.read().unwrap();
+            targets
+                .iter()
+                .filter(|profile| {
+                    !whitelist
+                        .whitelist
+                        .iter()
+                        .any(|entry| entry.uuid == profile.id)
+                })
+                .map(|profile| (profile.id, profile.name.clone()))
+                .collect()
+        };
+        let cancelled = state_update_cancelled(
+            server,
+            new_profiles.iter().map(|(id, name)| (id, name)),
+            "ADDED",
+        );
         let mut whitelist = server.data.whitelist_config.write().unwrap();
         let mut successes: i32 = 0;
         let mut modified = false;
@@ -204,6 +261,9 @@ impl CommandExecutor for AddExecutor {
                     existing_entry.name.clone_from(&profile.name);
                     modified = true;
                 }
+                continue;
+            }
+            if cancelled.contains(&profile.id) {
                 continue;
             }
             whitelist
@@ -255,9 +315,30 @@ impl CommandExecutor for RemoveExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let targets = GameProfileArgumentType::get(context, "targets")?;
         let server = context.source.server();
+        let listed: Vec<_> = {
+            let whitelist = server.data.whitelist_config.read().unwrap();
+            targets
+                .iter()
+                .filter(|profile| {
+                    whitelist
+                        .whitelist
+                        .iter()
+                        .any(|entry| entry.uuid == profile.id)
+                })
+                .map(|profile| (profile.id, profile.name.clone()))
+                .collect()
+        };
+        let cancelled = state_update_cancelled(
+            server,
+            listed.iter().map(|(id, name)| (id, name)),
+            "REMOVED",
+        );
         let mut whitelist = server.data.whitelist_config.write().unwrap();
         let mut successes: i32 = 0;
         for player in &targets {
+            if cancelled.contains(&player.id) {
+                continue;
+            }
             let i = whitelist
                 .whitelist
                 .iter()

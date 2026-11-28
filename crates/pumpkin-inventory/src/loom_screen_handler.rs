@@ -286,11 +286,23 @@ impl ScreenHandler for LoomScreenHandler {
         self.slots_changed();
     }
 
-    fn on_button_click(&mut self, _player: &dyn InventoryPlayer, button_id: i32) -> bool {
+    fn on_button_click(&mut self, player: &dyn InventoryPlayer, button_id: i32) -> bool {
         if button_id >= 0 && (button_id as usize) < self.selectable_patterns.len() {
+            let Some(pattern) =
+                player.loom_pattern_select(&self.selectable_patterns[button_id as usize])
+            else {
+                return false;
+            };
+            let Some(button_id) = self
+                .selectable_patterns
+                .iter()
+                .position(|selectable| *selectable == pattern)
+            else {
+                return false;
+            };
+            let button_id = button_id as i32;
             self.selected_banner_pattern_index
                 .store(button_id, Ordering::Relaxed);
-            let pattern = self.selectable_patterns[button_id as usize].clone();
             self.setup_result_slot(&pattern);
             true
         } else {

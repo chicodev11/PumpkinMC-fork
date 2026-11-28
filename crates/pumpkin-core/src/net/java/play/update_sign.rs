@@ -17,6 +17,24 @@ impl JavaClient {
         }
 
         let Some(block_entity) = world.get_block_entity(&sign_data.location) else {
+            // Paper `UncheckedSignChangeEvent`: an edit of a sign that is not in the world (a
+            // fake sign a plugin showed the player)
+            if let Some(player) = world.get_player_by_uuid(player.gameprofile.id) {
+                player.plugin_event(|player| {
+                    crate::plugin::api::events::player::unchecked_sign_change::UncheckedSignChangeEvent {
+                        player,
+                        location: sign_data.location,
+                        side: if sign_data.is_front_text { "FRONT" } else { "BACK" }.to_string(),
+                        lines: vec![
+                            sign_data.line_1.to_string(),
+                            sign_data.line_2.to_string(),
+                            sign_data.line_3.to_string(),
+                            sign_data.line_4.to_string(),
+                        ],
+                        cancelled: false,
+                    }
+                });
+            }
             return;
         };
         let Some(sign_entity) =

@@ -184,7 +184,20 @@ impl super::Phase for StrafingPhase {
                         dragon_entity,
                         direction,
                     ));
-                    world.spawn_entity(fireball);
+                    // Paper `EnderDragonShootFireballEvent`
+                    let fireball: Arc<dyn crate::entity::EntityBase> = fireball;
+                    let cancelled = world
+                        .entity_event(dragon_entity.entity_id, |dragon| {
+                            crate::plugin::api::events::entity::ender_dragon_shoot_fireball::EnderDragonShootFireballEvent {
+                                dragon,
+                                fireball: fireball.clone(),
+                                cancelled: false,
+                            }
+                        })
+                        .is_some_and(|event| event.cancelled);
+                    if !cancelled {
+                        world.spawn_entity(fireball);
+                    }
 
                     dragon
                         .path

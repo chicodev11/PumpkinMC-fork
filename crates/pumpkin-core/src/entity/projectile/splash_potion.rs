@@ -273,15 +273,33 @@ impl EntityBase for SplashPotionEntity {
             let owner = self.thrown.owner.get(&world);
             let potion_pos = self.get_entity().pos.load();
             let search_box = self.get_entity().bounding_box.load().expand(4.0, 2.0, 4.0);
-            for entity in world.get_all_at_box(&search_box) {
-                if entity.get_living_entity().is_some()
-                    && entity.is_sensitive_to_water()
-                    && entity
-                        .get_entity()
-                        .pos
-                        .load()
-                        .squared_distance_to_vec(&potion_pos)
-                        < 16.0
+            let mut to_damage: Vec<Arc<dyn EntityBase>> = world
+                .get_all_at_box(&search_box)
+                .into_iter()
+                .filter(|entity| {
+                    entity.get_living_entity().is_some()
+                        && entity.is_sensitive_to_water()
+                        && entity
+                            .get_entity()
+                            .pos
+                            .load()
+                            .squared_distance_to_vec(&potion_pos)
+                            < 16.0
+                })
+                .collect();
+            // Paper `WaterBottleSplashEvent`: change who gets hurt, or cancel the splash
+            match world.entity_event(self.get_entity().entity_id, |potion| {
+                crate::plugin::api::events::entity::water_bottle_splash::WaterBottleSplashEvent {
+                    potion,
+                    to_damage: to_damage.clone(),
+                    cancelled: false,
+                }
+            }) {
+                Some(event) if event.cancelled => return,
+                Some(event) => to_damage = event.to_damage,
+                None => {}
+            }
+            for entity in to_damage {
                 {
                     entity.damage_with_context(
                         entity.as_ref(),

@@ -373,27 +373,48 @@ impl ClientPlatform {
     }
 }
 
+/// Paper `PlayerServerFullCheckEvent`: whether a joining player is kicked because the server
+/// is full.
+pub async fn server_full_kick(server: &Arc<Server>, name: &str, uuid: String, full: bool) -> bool {
+    use crate::plugin::api::events::player::player_server_full_check::PlayerServerFullCheckEvent;
+    if !server
+        .plugin_manager
+        .has_handlers::<PlayerServerFullCheckEvent>()
+    {
+        return full;
+    }
+    let mut event = PlayerServerFullCheckEvent {
+        name: name.to_string(),
+        uuid,
+        allowed: !full,
+    };
+    server.plugin_manager.fire(server, &mut event).await;
+    !event.allowed
+}
+
 pub async fn can_not_join(
     profile: &GameProfile,
     address: &SocketAddr,
-    server: &Server,
+    server: &Arc<Server>,
 ) -> Option<TextComponent> {
     const FORMAT_DESCRIPTION: &[time::format_description::FormatItem<'static>] = time::macros::format_description!(
         "[year]-[month]-[day] at [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]"
     );
 
-    let mut banned_players = server
+    let banned = server
         .data
         .banned_player_list
         .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(entry) = banned_players.get_entry(profile) {
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_entry(profile)
+        .map(|entry| (entry.reason.clone(), entry.expires));
+    if let Some((reason, expires)) = banned {
         let text = TextComponent::translate_cross(
             translation::java::MULTIPLAYER_DISCONNECT_BANNED_REASON,
             translation::java::MULTIPLAYER_DISCONNECT_BANNED_REASON,
-            [TextComponent::text(entry.reason.clone())],
+            [TextComponent::text(reason)],
         );
-        return Some(match entry.expires {
+        return Some(match expires {
             Some(expires) => text.add_child(TextComponent::translate_cross(
                 translation::java::MULTIPLAYER_DISCONNECT_BANNED_EXPIRATION,
                 translation::java::MULTIPLAYER_DISCONNECT_BANNED_EXPIRATION,
@@ -404,21 +425,48 @@ pub async fn can_not_join(
             None => text,
         });
     }
-    drop(banned_players);
 
     if server.white_list.load(Ordering::Relaxed) {
-        let ops = server
+        let is_op = server
             .data
             .operator_config
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let whitelist = server
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_entry(&profile.id)
+            .is_some();
+        let whitelisted = server
             .data
             .whitelist_config
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-        if ops.get_entry(&profile.id).is_none() && !whitelist.is_whitelisted(profile) {
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_whitelisted(profile);
+        // Paper `ProfileWhitelistVerifyEvent`
+        if server
+            .plugin_manager
+            .has_handlers::<crate::plugin::api::events::server::profile_whitelist_verify::ProfileWhitelistVerifyEvent>()
+        {
+            let mut event = crate::plugin::api::events::server::profile_whitelist_verify::ProfileWhitelistVerifyEvent {
+                name: profile.name.clone(),
+                uuid: profile.id.to_string(),
+                whitelisted,
+                whitelist_enabled: true,
+                is_op,
+                kick_message: None,
+            };
+            server.plugin_manager.fire(server, &mut event).await;
+            if !event.whitelisted {
+                return Some(event.kick_message.map_or_else(
+                    || {
+                        TextComponent::translate_cross(
+                            translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
+                            translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
+                            &[],
+                        )
+                    },
+                    TextComponent::text,
+                ));
+            }
+        } else if !is_op && !whitelisted {
             return Some(TextComponent::translate_cross(
                 translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
                 translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,

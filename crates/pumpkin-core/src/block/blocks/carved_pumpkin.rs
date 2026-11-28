@@ -173,6 +173,10 @@ fn spawn_copper_golem(world: &Arc<World>, pattern: &CopperGolemPattern) {
         _ => WeatherState::Unaffected,
     };
     golem.set_weather_state(weather_state);
+    let golem_entity: Arc<dyn EntityBase> = golem.clone();
+    if construct_cancelled(world, &golem_entity, vec![*pumpkin, *copper]) {
+        return;
+    }
     if !world.spawn_entity(golem.clone()) {
         return;
     }
@@ -224,12 +228,33 @@ fn try_spawn_golem(world: &Arc<World>, top_pos: &BlockPos) {
     }
 }
 
+/// Paper `EntityConstructEvent`: `true` when a plugin cancelled building `entity` out of
+/// `blocks` (the blocks then stay).
+pub(crate) fn construct_cancelled(
+    world: &World,
+    entity: &Arc<dyn EntityBase>,
+    blocks: Vec<BlockPos>,
+) -> bool {
+    world
+        .plugin_event(|| {
+            crate::plugin::api::events::entity::entity_construct::EntityConstructEvent {
+                entity: entity.clone(),
+                blocks,
+                cancelled: false,
+            }
+        })
+        .is_some_and(|event| event.cancelled)
+}
+
 fn spawn_golem_in_world(
     world: &Arc<World>,
     pattern: &GolemPattern,
     golem: &Arc<dyn EntityBase>,
     spawn_pos: BlockPos,
 ) {
+    if construct_cancelled(world, golem, pattern.cells().collect()) {
+        return;
+    }
     for pos in pattern.cells() {
         let state_id = world.get_block_state_id(&pos);
         world.set_block_state(

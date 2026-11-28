@@ -63,28 +63,49 @@ fn set_size(
     time_in_ticks: i64,
 ) -> Result<i32, CommandSyntaxError> {
     let world = source.world().clone();
-    let (current, diff) = {
-        let mut border = world
-            .worldborder
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current = border.new_diameter;
+    let current = world
+        .worldborder
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .new_diameter;
 
-        if (current - distance).abs() < f64::EPSILON {
-            return Err(ERROR_SAME_SIZE.create_without_context());
-        }
-        if distance < 1.0 {
-            return Err(ERROR_TOO_SMALL.create_without_context());
-        }
-        if distance > 5.999_997e7 {
-            return Err(ERROR_TOO_BIG.create_without_context());
-        }
+    if (current - distance).abs() < f64::EPSILON {
+        return Err(ERROR_SAME_SIZE.create_without_context());
+    }
+    if distance < 1.0 {
+        return Err(ERROR_TOO_SMALL.create_without_context());
+    }
+    if distance > 5.999_997e7 {
+        return Err(ERROR_TOO_BIG.create_without_context());
+    }
 
-        let speed = (time_in_ticks > 0).then(|| time_in_ticks * 50); // ticks to milliseconds
+    let mut distance = distance;
+    let mut speed = (time_in_ticks > 0).then(|| time_in_ticks * 50); // ticks to milliseconds
 
-        border.set_diameter(&world, distance, speed);
-        (current, (distance - current) as i32)
-    };
+    // Paper `WorldBorderBoundsChangeEvent`, fired outside the border lock
+    if let Some(event) = world.plugin_event(|| {
+        crate::plugin::api::events::world::world_border_bounds_change::WorldBorderBoundsChangeEvent {
+            world: world.clone(),
+            change_type: if speed.is_some() { "STARTED_MOVE" } else { "INSTANT_MOVE" }.to_string(),
+            old_size: current,
+            new_size: distance,
+            duration: speed.unwrap_or(0) as f64,
+            cancelled: false,
+        }
+    }) {
+        if event.cancelled {
+            return Ok(0);
+        }
+        distance = event.new_size;
+        speed = (event.duration > 0.0).then_some(event.duration as i64);
+    }
+
+    world
+        .worldborder
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .set_diameter(&world, distance, speed);
+    let diff = (distance - current) as i32;
 
     let formatted_distance = format!("{distance:.1}");
     if time_in_ticks > 0 {
@@ -130,14 +151,15 @@ fn set_size(
 
 fn set_center(source: &CommandSource, center: Vector2<f64>) -> Result<i32, CommandSyntaxError> {
     let world = source.world().clone();
-    let mut border = world
-        .worldborder
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (old_x, old_z) = {
+        let border = world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (border.center_x, border.center_z)
+    };
 
-    if (border.center_x - center.x).abs() < f64::EPSILON
-        && (border.center_z - center.y).abs() < f64::EPSILON
-    {
+    if (old_x - center.x).abs() < f64::EPSILON && (old_z - center.y).abs() < f64::EPSILON {
         return Err(ERROR_SAME_CENTER.create_without_context());
     }
 
@@ -145,7 +167,29 @@ fn set_center(source: &CommandSource, center: Vector2<f64>) -> Result<i32, Comma
         return Err(ERROR_TOO_FAR_OUT.create_without_context());
     }
 
-    border.set_center(&world, center.x, center.y);
+    // Paper `WorldBorderCenterChangeEvent`, fired outside the border lock
+    let mut center = center;
+    if let Some(event) = world.plugin_event(|| {
+        crate::plugin::api::events::world::world_border_center_change::WorldBorderCenterChangeEvent {
+            world: world.clone(),
+            old_center_x: old_x,
+            old_center_z: old_z,
+            new_center_x: center.x,
+            new_center_z: center.y,
+            cancelled: false,
+        }
+    }) {
+        if event.cancelled {
+            return Ok(0);
+        }
+        center = Vector2::new(event.new_center_x, event.new_center_z);
+    }
+
+    world
+        .worldborder
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .set_center(&world, center.x, center.y);
 
     source.send_feedback(
         TextComponent::translate_cross(

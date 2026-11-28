@@ -59,12 +59,29 @@ pub fn can_use_golden_dandelion(
 pub fn set_age_locked(
     mob: &(impl Mob + ?Sized),
     is_age_locked: impl Fn() -> bool,
-    player: &crate::entity::player::Player,
+    player: &std::sync::Arc<crate::entity::player::Player>,
     stack: &mut pumpkin_data::item_stack::ItemStack,
     set_age_lock_data: impl FnOnce(),
 ) {
     use pumpkin_data::sound::{Sound, SoundCategory};
     let entity = mob.get_entity();
+    // Paper `PlayerToggleEntityAgeLockEvent`
+    if entity
+        .world
+        .load()
+        .entity_event(entity.entity_id, |target| {
+            crate::plugin::api::events::player::player_toggle_entity_age_lock::PlayerToggleEntityAgeLockEvent {
+                player: player.clone(),
+                entity: target,
+                item: stack.clone(),
+                age_locked: !is_age_locked(),
+                cancelled: false,
+            }
+        })
+        .is_some_and(|event| event.cancelled)
+    {
+        return;
+    }
     set_age_lock_data();
     stack.decrement_unless_creative(player.gamemode.load(), 1);
     let age_locked = is_age_locked();

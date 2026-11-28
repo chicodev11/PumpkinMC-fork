@@ -114,6 +114,18 @@ pub mod target_hit;
 /// Vault Change State event.
 pub mod vault_change_state;
 
+/// Compost Item event.
+pub mod compost_item;
+
+/// Block Break Block event.
+pub mod block_break_block;
+
+/// Block Lock Check event.
+pub mod block_lock_check;
+
+/// Block Destroy event.
+pub mod block_destroy;
+
 pub use anvil_damaged::*;
 pub use beacon_activated::*;
 pub use beacon_deactivated::*;
@@ -122,6 +134,7 @@ pub use bell_resonate::*;
 pub use bell_reveal_raider::*;
 pub use bell_ring::*;
 pub use block_break::*;
+pub use block_break_block::*;
 pub use block_break_progress_update::*;
 pub use block_brush::*;
 pub use block_burn::*;
@@ -129,6 +142,7 @@ pub use block_can_build::*;
 pub use block_cook::*;
 pub use block_damage::*;
 pub use block_damage_abort::*;
+pub use block_destroy::*;
 pub use block_dispense::*;
 pub use block_dispense_armor::*;
 pub use block_dispense_loot::*;
@@ -142,6 +156,7 @@ pub use block_form::*;
 pub use block_from_to::*;
 pub use block_grow::*;
 pub use block_ignite::*;
+pub use block_lock_check::*;
 pub use block_multi_place::*;
 pub use block_physics::*;
 pub use block_piston::*;
@@ -154,6 +169,7 @@ pub use block_spread::*;
 pub use brewing_start::*;
 pub use campfire_start::*;
 pub use cauldron_level_change::*;
+pub use compost_item::*;
 pub use crafter_craft::*;
 pub use dragon_egg_form::*;
 pub use entity_block_form::*;

@@ -735,6 +735,8 @@ pub struct Player {
     pub screen_handler_sync_id: AtomicU8,
     pub screen_handler_listener: Arc<dyn ScreenHandlerListener>,
     pub inventory_changed: Arc<AtomicBool>,
+    /// Slot changes of the player's inventory menu waiting for `PlayerInventorySlotChangeEvent`.
+    pub inventory_slot_changes: Arc<Mutex<InventorySlotChanges>>,
     pub screen_handler_sync_handler: Arc<SyncHandler>,
     pub tab_list_header: Mutex<TextComponent>,
     pub tab_list_footer: Mutex<TextComponent>,
@@ -903,17 +905,33 @@ impl Player {
         gamemode: GameMode,
     ) -> Self {
         let inventory_changed = Arc::new(AtomicBool::new(true));
+        let inventory_slot_changes = Arc::new(Mutex::new(InventorySlotChanges::default()));
 
-        struct ScreenListener(Arc<AtomicBool>);
+        struct ScreenListener(Arc<AtomicBool>, Arc<Mutex<InventorySlotChanges>>);
 
         impl ScreenHandlerListener for ScreenListener {
             fn on_slot_update(
                 &self,
-                _screen_handler: &ScreenHandlerBehaviour,
-                _slot: u8,
-                _stack: ItemStack,
+                screen_handler: &ScreenHandlerBehaviour,
+                slot: u8,
+                stack: ItemStack,
             ) {
                 self.0.store(true, Ordering::Relaxed);
+                // Paper `PlayerInventorySlotChangeEvent` is about the player's own inventory menu;
+                // the event fires on the player's tick, outside the screen handler lock
+                if screen_handler.sync_id == 0 {
+                    let mut changes = self
+                        .1
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let old = changes
+                        .last
+                        .insert(slot, stack.clone())
+                        .unwrap_or_else(|| ItemStack::EMPTY.clone());
+                    if changes.tracking {
+                        changes.pending.push((slot, old, stack));
+                    }
+                }
             }
         }
 
@@ -1087,8 +1105,12 @@ impl Player {
             player_screen_handler: player_screen_handler.clone(),
             current_screen_handler: std::sync::Mutex::new(player_screen_handler),
             screen_handler_sync_id: AtomicU8::new(0),
-            screen_handler_listener: Arc::new(ScreenListener(inventory_changed.clone())),
+            screen_handler_listener: Arc::new(ScreenListener(
+                inventory_changed.clone(),
+                inventory_slot_changes.clone(),
+            )),
             inventory_changed,
+            inventory_slot_changes,
             screen_handler_sync_handler: Arc::new(SyncHandler::new()),
             tab_list_header: Mutex::new(TextComponent::text("")),
             tab_list_footer: Mutex::new(TextComponent::text("")),
@@ -1872,6 +1894,25 @@ impl Player {
 
         let is_mace_smash = item_stack.item.id == pumpkin_data::item::Item::MACE.id
             && can_smash_attack(&self.living_entity);
+        // Paper `EntityAttemptSmashAttackEvent`: plugins may allow or deny the smash
+        let is_mace_smash = if item_stack.item.id == pumpkin_data::item::Item::MACE.id {
+            self.plugin_event(|player| {
+                crate::plugin::api::events::entity::entity_attempt_smash_attack::EntityAttemptSmashAttackEvent {
+                    entity: player,
+                    target: victim.clone(),
+                    weapon: item_stack.clone(),
+                    original_result: is_mace_smash,
+                    result: "DEFAULT".to_string(),
+                }
+            })
+            .map_or(is_mace_smash, |event| match event.result.as_str() {
+                "ALLOW" => true,
+                "DENY" => false,
+                _ => is_mace_smash,
+            })
+        } else {
+            is_mace_smash
+        };
         // Vanilla adds the weapon's damage bonus before the critical hit multiplier.
         if is_mace_smash {
             let fall_distance = f64::from(self.living_entity.fall_distance.load());
@@ -2460,13 +2501,44 @@ impl Player {
         }
 
         let mut final_block_pos = block_pos;
+        let mut forced = forced;
+        // Paper `PlayerSetSpawnEvent`
+        if let Some(event) = self.plugin_event(|player| {
+            let block = self.world().get_block(&block_pos);
+            let cause = if forced {
+                "COMMAND"
+            } else if block == &Block::RESPAWN_ANCHOR {
+                "RESPAWN_ANCHOR"
+            } else if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_BEDS) {
+                "BED"
+            } else {
+                "UNKNOWN"
+            };
+            crate::plugin::api::events::player::player_set_spawn::PlayerSetSpawnEvent {
+                player,
+                cause: cause.to_string(),
+                location: Some(block_pos),
+                forced,
+                notify_player: !forced,
+                cancelled: false,
+            }
+        }) {
+            if event.cancelled {
+                return false;
+            }
+            match event.location {
+                Some(pos) => final_block_pos = pos,
+                None => return false,
+            }
+            forced = event.forced;
+        }
         if let Some(player_arc) = self.world().get_player_by_uuid(self.gameprofile.id)
             && let Some(server) = self.world().server.upgrade()
         {
             let mut event =
                 crate::plugin::api::events::player::player_spawn_change::PlayerSpawnChangeEvent {
                     player: player_arc,
-                    new_spawn: Some(block_pos),
+                    new_spawn: Some(final_block_pos),
                     forced,
                     cancelled: false,
                 };
@@ -3589,6 +3661,7 @@ impl Player {
                         },
                     );
                     self.pair_entities_in_chunks(&world, &sent);
+                    self.chunks_loaded_event(&sent);
                 }
                 ClientPlatform::Bedrock(bedrock) => {
                     let current_epoch = self.chunk_send_epoch.load(Ordering::Relaxed);
@@ -3623,6 +3696,7 @@ impl Player {
                                 ready.extend(sender.mark_delivered(&deliveries));
                                 drop(sender);
                                 player.pair_entities_in_chunks(&world, &ready);
+                                player.chunks_loaded_event(&ready);
                                 player.try_bedrock_spawn();
                             }
                         });
@@ -4236,7 +4310,16 @@ impl Player {
         if !loaded {
             self.client_loaded_timeout.store(60, Ordering::Relaxed);
         }
-        self.client_loaded.store(loaded, Ordering::Relaxed);
+        let was_loaded = self.client_loaded.swap(loaded, Ordering::Relaxed);
+        // Paper `PlayerClientLoadedWorldEvent`
+        if loaded && !was_loaded {
+            self.plugin_event(|player| {
+                crate::plugin::api::events::player::player_client_loaded_world::PlayerClientLoadedWorldEvent {
+                    player,
+                    timeout: false,
+                }
+            });
+        }
     }
 
     /// Spawns a Bedrock player once five chunks are queued ahead of `PlayerSpawn`.
@@ -6353,6 +6436,19 @@ impl Player {
         }
     }
 
+    /// Paper `PlayerChunkLoadEvent` for chunks the client now has.
+    pub(crate) fn chunks_loaded_event(&self, chunks: &[Vector2<i32>]) {
+        for pos in chunks {
+            self.plugin_event(|player| {
+                crate::plugin::api::events::player::player_chunk_load::PlayerChunkLoadEvent {
+                    player,
+                    chunk_x: pos.x,
+                    chunk_z: pos.y,
+                }
+            });
+        }
+    }
+
     pub fn tick_client_load_timeout(&self) {
         if !self.supports_player_loaded() {
             return;
@@ -6361,6 +6457,15 @@ impl Player {
             let timeout = self.client_loaded_timeout.load(Ordering::Relaxed);
             self.client_loaded_timeout
                 .store(timeout.saturating_sub(1), Ordering::Relaxed);
+            // Paper `PlayerClientLoadedWorldEvent` when the wait for the client runs out
+            if timeout == 1 {
+                self.plugin_event(|player| {
+                    crate::plugin::api::events::player::player_client_loaded_world::PlayerClientLoadedWorldEvent {
+                        player,
+                        timeout: true,
+                    }
+                });
+            }
         }
     }
 
@@ -7491,6 +7596,7 @@ impl Player {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn open_handled_screen(
         &self,
         screen_handler_factory: &dyn ScreenHandlerFactory,
@@ -7505,7 +7611,23 @@ impl Player {
             && let Some(be) = self.world().get_block_entity(&pos)
             && let Some(lock) = be.get_lock()
             && self.gamemode.load() != GameMode::Spectator
-            && !lock.unlocks_with(&self.inventory.held_item())
+            && {
+                let locked = !lock.unlocks_with(&self.inventory.held_item());
+                // Paper `BlockLockCheckEvent`: plugins may force the lock open or shut
+                self.plugin_event(|player| {
+                    crate::plugin::api::events::block::block_lock_check::BlockLockCheckEvent {
+                        player,
+                        block: pos,
+                        item: self.inventory.held_item(),
+                        result: "DEFAULT".to_string(),
+                    }
+                })
+                .map_or(locked, |event| match event.result.as_str() {
+                    "ALLOW" => false,
+                    "DENY" => true,
+                    _ => locked,
+                })
+            }
         {
             self.send_system_message_raw(
                 &TextComponent::translate("container.isLocked", [display_name]),
@@ -8478,6 +8600,31 @@ impl Player {
     }
 
     pub fn check_inventory_advancements(&self) {
+        // Paper `PlayerInventorySlotChangeEvent`
+        let has_handlers = self.world().server.upgrade().is_some_and(|server| {
+            server.plugin_manager.has_handlers::<
+                crate::plugin::api::events::player::player_inventory_slot_change::PlayerInventorySlotChangeEvent,
+            >()
+        });
+        let pending = {
+            let mut changes = self
+                .inventory_slot_changes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            changes.tracking = has_handlers;
+            std::mem::take(&mut changes.pending)
+        };
+        for (raw_slot, old_item, new_item) in pending {
+            self.plugin_event(|player| {
+                crate::plugin::api::events::player::player_inventory_slot_change::PlayerInventorySlotChangeEvent {
+                    player,
+                    raw_slot: i32::from(raw_slot),
+                    old_item,
+                    new_item,
+                    should_trigger_advancements: true,
+                }
+            });
+        }
         if self.inventory_changed.swap(false, Ordering::Relaxed)
             && let Some(p) = self.world().get_player_by_uuid(self.gameprofile.id)
         {
@@ -8486,6 +8633,14 @@ impl Player {
             );
         }
     }
+}
+
+/// See [`Player::inventory_slot_changes`].
+#[derive(Default)]
+pub struct InventorySlotChanges {
+    last: std::collections::HashMap<u8, ItemStack>,
+    pending: Vec<(u8, ItemStack, ItemStack)>,
+    tracking: bool,
 }
 
 impl PartialEq for Player {
@@ -10246,6 +10401,13 @@ impl InventoryPlayer for Player {
     }
 
     fn on_recipe_crafted(&self, item: &pumpkin_data::item_stack::ItemStack) {
+        // Paper `ItemCraftedEvent`
+        self.plugin_event(|player| {
+            crate::plugin::api::events::inventory::item_crafted::ItemCraftedEvent {
+                player,
+                crafted_item: item.clone(),
+            }
+        });
         let key = item.item.registry_key.to_string();
         self.trigger_advancement(
             crate::entity::player::advancement::trigger::AdvancementTrigger::RecipeCrafted {
@@ -10282,6 +10444,32 @@ impl InventoryPlayer for Player {
         if let Some(server) = self.world().server.upgrade() {
             crate::world::map::resolve_map_post_processing(stack, &server);
         }
+    }
+
+    fn loom_pattern_select(&self, pattern: &str) -> Option<String> {
+        match self.plugin_event(|player| {
+            crate::plugin::api::events::player::player_loom_pattern_select::PlayerLoomPatternSelectEvent {
+                player,
+                pattern: pattern.to_string(),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => None,
+            Some(event) => Some(event.pattern),
+            None => Some(pattern.to_string()),
+        }
+    }
+
+    fn stonecutter_recipe_select(&self, result: &str) -> bool {
+        !self
+            .plugin_event(|player| {
+                crate::plugin::api::events::player::player_stonecutter_recipe_select::PlayerStonecutterRecipeSelectEvent {
+                    player,
+                    recipe: result.to_string(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
     }
 
     fn map_state(&self, map_id: i32) -> Option<(bool, i8)> {

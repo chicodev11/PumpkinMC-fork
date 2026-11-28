@@ -270,6 +270,16 @@ pub trait InventoryPlayer: Send + Sync {
 
     fn on_crafted_post_process(&self, _stack: &mut ItemStack) {}
 
+    /// Paper `PlayerLoomPatternSelectEvent`: the pattern to select, `None` when cancelled.
+    fn loom_pattern_select(&self, pattern: &str) -> Option<String> {
+        Some(pattern.to_string())
+    }
+
+    /// Paper `PlayerStonecutterRecipeSelectEvent`: whether the recipe may be selected.
+    fn stonecutter_recipe_select(&self, _result: &str) -> bool {
+        true
+    }
+
     fn map_state(&self, _map_id: i32) -> Option<(bool, i8)> {
         None
     }

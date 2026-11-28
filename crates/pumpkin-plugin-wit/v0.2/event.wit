@@ -1583,6 +1583,640 @@ interface event {
         cause: string
     }
 
+    /// A player fails to get into a bed (Paper `PlayerBedFailEnterEvent`). Cancelling skips the failure message or explosion.
+    record player-bed-fail-enter-event-data {
+        player: player,
+        fail-reason: string,
+        bed: block-pos,
+        will-explode: bool,
+        cancelled: bool
+    }
+
+    /// A player shears a block such as a pumpkin or a beehive (Paper `PlayerShearBlockEvent`).
+    record player-shear-block-event-data {
+        player: player,
+        block: block-pos,
+        item: item-stack,
+        hand: string,
+        drops: list<item-stack>,
+        cancelled: bool
+    }
+
+    /// A golem or wither is built from blocks (Paper `EntityConstructEvent`).
+    record entity-construct-event-data {
+        entity: entity,
+        blocks: list<block-pos>,
+        cancelled: bool
+    }
+
+    /// An entity puts an item into a composter (Paper `EntityCompostItemEvent`).
+    record entity-compost-item-event-data {
+        entity: entity,
+        block: block-pos,
+        item: item-stack,
+        will-raise-level: bool,
+        cancelled: bool
+    }
+
+    /// A hopper puts an item into a composter (Paper `CompostItemEvent`).
+    record compost-item-event-data {
+        block: block-pos,
+        item: item-stack,
+        will-raise-level: bool
+    }
+
+    /// A player is teleported by an end gateway (Paper `PlayerTeleportEndGatewayEvent`).
+    record player-teleport-end-gateway-event-data {
+        player: player,
+        from-location: position,
+        to-location: position,
+        gateway: block-pos,
+        cancelled: bool
+    }
+
+    /// An entity is teleported by an end gateway (Paper `EntityTeleportEndGatewayEvent`).
+    record entity-teleport-end-gateway-event-data {
+        entity: entity,
+        from-location: position,
+        to-location: position,
+        gateway: block-pos,
+        cancelled: bool
+    }
+
+    /// A player turns a page of a book on a lectern (Paper `PlayerLecternPageChangeEvent`).
+    record player-lectern-page-change-event-data {
+        player: player,
+        lectern: block-pos,
+        book: item-stack,
+        page-turn: string,
+        old-page: s32,
+        new-page: s32,
+        cancelled: bool
+    }
+
+    /// A player puts a book on a lectern (Paper `PlayerInsertLecternBookEvent`).
+    record player-insert-lectern-book-event-data {
+        player: player,
+        block: block-pos,
+        book: item-stack,
+        cancelled: bool
+    }
+
+    /// A player clicks a sign that runs a command (Paper `PlayerSignCommandPreprocessEvent`).
+    record player-sign-command-preprocess-event-data {
+        player: player,
+        message: string,
+        sign: block-pos,
+        cancelled: bool
+    }
+
+    /// A spawner is about to spawn an entity (Paper `PreSpawnerSpawnEvent`).
+    record pre-spawner-spawn-event-data {
+        location: position,
+        entity-type: string,
+        spawner-location: block-pos,
+        should-abort-spawn: bool,
+        cancelled: bool
+    }
+
+    /// Flowing fluid washes a block away (Paper `BlockBreakBlockEvent`).
+    record block-break-block-event-data {
+        block: block-pos,
+        source: block-pos,
+        drops: list<item-stack>
+    }
+
+    /// The command tree is sent to a player (Paper `AsyncPlayerSendCommandsEvent`). Removing a root command hides it from the client.
+    record async-player-send-commands-event-data {
+        player: player,
+        commands: list<string>
+    }
+
+    /// Structures are searched for, for example by `/locate structure` (Paper `StructuresLocateEvent`).
+    record structures-locate-event-data {
+        event-world: %world,
+        origin: block-pos,
+        structures: list<string>,
+        radius: s32,
+        find-unexplored: bool,
+        cancelled: bool
+    }
+
+    /// The whitelist is turned on or off (Paper `WhitelistToggleEvent`).
+    record whitelist-toggle-event-data {
+        enabled: bool
+    }
+
+    /// A profile is added to or removed from the whitelist (Paper `WhitelistStateUpdateEvent`).
+    record whitelist-state-update-event-data {
+        name: string,
+        uuid: string,
+        status: string,
+        cancelled: bool
+    }
+
+    /// A world border changes size (Paper `WorldBorderBoundsChangeEvent`).
+    record world-border-bounds-change-event-data {
+        event-world: %world,
+        change-type: string,
+        old-size: f64,
+        new-size: f64,
+        duration: f64,
+        cancelled: bool
+    }
+
+    /// A world border moves its center (Paper `WorldBorderCenterChangeEvent`).
+    record world-border-center-change-event-data {
+        event-world: %world,
+        old-center-x: f64,
+        old-center-z: f64,
+        new-center-x: f64,
+        new-center-z: f64,
+        cancelled: bool
+    }
+
+    /// Someone runs a command that does not exist (Paper `UnknownCommandEvent`). No message shows nothing.
+    record unknown-command-event-data {
+        player: option<player>,
+        command-line: string,
+        message: option<string>
+    }
+
+    /// A player locks or unlocks the age of an entity (Paper `PlayerToggleEntityAgeLockEvent`).
+    record player-toggle-entity-age-lock-event-data {
+        player: player,
+        entity: entity,
+        item: item-stack,
+        age-locked: bool,
+        cancelled: bool
+    }
+
+    /// A copper golem checks whether a container is a valid target (Paper `ItemTransportingEntityValidateTargetEvent`).
+    record item-transporting-entity-validate-target-event-data {
+        entity: entity,
+        block: block-pos,
+        allowed: bool
+    }
+
+    /// Two animals breed into an egg instead of a baby (Paper `EntityFertilizeEggEvent`).
+    record entity-fertilize-egg-event-data {
+        entity: entity,
+        father: entity,
+        breeder: option<player>,
+        experience: s32,
+        cancelled: bool
+    }
+
+    /// The ender dragon breathes flame (Paper `EnderDragonFlameEvent`).
+    record ender-dragon-flame-event-data {
+        dragon: entity,
+        area-effect-cloud: entity,
+        cancelled: bool
+    }
+
+    /// The ender dragon shoots a fireball (Paper `EnderDragonShootFireballEvent`).
+    record ender-dragon-shoot-fireball-event-data {
+        dragon: entity,
+        fireball: entity,
+        cancelled: bool
+    }
+
+    /// An entity is knocked back by an attack (Paper `EntityPushedByEntityAttackEvent`).
+    record entity-pushed-by-entity-attack-event-data {
+        entity: entity,
+        pushed-by: entity,
+        cause: string,
+        knockback: position,
+        cancelled: bool
+    }
+
+    /// A player touches an item they could pick up (Paper `PlayerAttemptPickupItemEvent`).
+    record player-attempt-pickup-item-event-data {
+        player: player,
+        item-entity-id: s32,
+        item: item-stack,
+        cancelled: bool
+    }
+
+    /// An entity in a riptide spin hits another (Paper `EntityAttemptSpinAttackEvent`).
+    record entity-attempt-spin-attack-event-data {
+        entity: entity,
+        target: entity,
+        cancelled: bool
+    }
+
+    /// An entity's equipment changed (Paper `EntityEquipmentChangedEvent`).
+    record entity-equipment-changed-event-data {
+        entity: entity,
+        slots: list<string>,
+        new-items: list<item-stack>
+    }
+
+    /// An entity pushes into another (Paper `EntityCollideWithEntityEvent`).
+    record entity-collide-with-entity-event-data {
+        entity: entity,
+        collided: entity,
+        cancelled: bool
+    }
+
+    /// A tamed animal's death message is sent to its owner (Paper `TameableDeathMessageEvent`).
+    record tameable-death-message-event-data {
+        entity: entity,
+        death-message: string,
+        cancelled: bool
+    }
+
+    /// An effect ticks on an entity (Paper `EntityEffectTickEvent`).
+    record entity-effect-tick-event-data {
+        entity: entity,
+        effect-type: string,
+        amplifier: s32,
+        cancelled: bool
+    }
+
+    /// A non-player entity's item loses durability (Paper `EntityDamageItemEvent`).
+    record entity-damage-item-event-data {
+        entity: entity,
+        item: item-stack,
+        damage: s32,
+        cancelled: bool
+    }
+
+    /// A slime swims (Paper `SlimeSwimEvent`).
+    record slime-swim-event-data {
+        slime: entity,
+        cancelled: bool
+    }
+
+    /// A slime picks a new direction (Paper `SlimeChangeDirectionEvent`).
+    record slime-change-direction-event-data {
+        slime: entity,
+        new-yaw: f32,
+        cancelled: bool
+    }
+
+    /// A slime wanders (Paper `SlimeWanderEvent`).
+    record slime-wander-event-data {
+        slime: entity,
+        cancelled: bool
+    }
+
+    /// An enderman teleports away (Paper `EndermanEscapeEvent`).
+    record enderman-escape-event-data {
+        enderman: entity,
+        reason: string,
+        cancelled: bool
+    }
+
+    /// A shulker hit by a shulker bullet duplicates (Paper `ShulkerDuplicateEvent`).
+    record shulker-duplicate-event-data {
+        entity: entity,
+        parent: entity,
+        cancelled: bool
+    }
+
+    /// A slime targets an entity (Paper `SlimeTargetLivingEntityEvent`).
+    record slime-target-living-entity-event-data {
+        slime: entity,
+        target: entity,
+        cancelled: bool
+    }
+
+    /// An entity starts its fuse (Paper `EntityIgniteEvent`).
+    record entity-ignite-event-data {
+        entity: entity,
+        fuse-time: s32,
+        cancelled: bool
+    }
+
+    /// A sulfur cube swallows an item from a player (Paper `SulfurCubeSwallowItemEvent`).
+    record sulfur-cube-swallow-item-event-data {
+        sulfur-cube: entity,
+        player: player,
+        old-item: item-stack,
+        new-item: item-stack,
+        cancelled: bool
+    }
+
+    /// A witch throws a potion (Paper `WitchThrowPotionEvent`).
+    record witch-throw-potion-event-data {
+        witch: entity,
+        target: entity,
+        potion: option<item-stack>,
+        cancelled: bool
+    }
+
+    /// A witch drinks a potion (Paper `WitchConsumePotionEvent`).
+    record witch-consume-potion-event-data {
+        witch: entity,
+        potion: option<item-stack>,
+        cancelled: bool
+    }
+
+    /// A witch readies a potion (Paper `WitchReadyPotionEvent`).
+    record witch-ready-potion-event-data {
+        witch: entity,
+        potion: option<item-stack>,
+        cancelled: bool
+    }
+
+    /// An entity has stood in a nether portal long enough to travel (Paper `EntityPortalReadyEvent`).
+    record entity-portal-ready-event-data {
+        entity: entity,
+        portal-type: string,
+        target-world: %world,
+        cancelled: bool
+    }
+
+    /// A turtle lays eggs (Paper `TurtleLayEggEvent`).
+    record turtle-lay-egg-event-data {
+        turtle: entity,
+        location: block-pos,
+        egg-count: s32,
+        cancelled: bool
+    }
+
+    /// A turtle starts digging to lay eggs (Paper `TurtleStartDiggingEvent`).
+    record turtle-start-digging-event-data {
+        turtle: entity,
+        location: block-pos,
+        cancelled: bool
+    }
+
+    /// A turtle heads home (Paper `TurtleGoHomeEvent`).
+    record turtle-go-home-event-data {
+        turtle: entity,
+        cancelled: bool
+    }
+
+    /// Lightning turns an entity into another (Paper `EntityZapEvent`).
+    record entity-zap-event-data {
+        entity: entity,
+        bolt: entity,
+        replacement-type: string,
+        cancelled: bool
+    }
+
+    /// A player attempts a mace smash attack (Paper `EntityAttemptSmashAttackEvent`). `result` is `DEFAULT`, `ALLOW` or `DENY`.
+    record entity-attempt-smash-attack-event-data {
+        entity: player,
+        target: entity,
+        weapon: item-stack,
+        original-result: bool,
+        event-result: string
+    }
+
+    /// A player's respawn point is set (Paper `PlayerSetSpawnEvent`).
+    record player-set-spawn-event-data {
+        player: player,
+        cause: string,
+        location: option<block-pos>,
+        forced: bool,
+        notify-player: bool,
+        cancelled: bool
+    }
+
+    /// A player's client finished loading the world, or the wait for it ran out (Paper `PlayerClientLoadedWorldEvent`).
+    record player-client-loaded-world-event-data {
+        player: player,
+        timeout: bool
+    }
+
+    /// A chunk is sent to a player (Paper `PlayerChunkLoadEvent`).
+    record player-chunk-load-event-data {
+        player: player,
+        chunk-x: s32,
+        chunk-z: s32
+    }
+
+    /// A chunk is unloaded for a player (Paper `PlayerChunkUnloadEvent`).
+    record player-chunk-unload-event-data {
+        player: player,
+        chunk-x: s32,
+        chunk-z: s32
+    }
+
+    /// A player opens a locked container (Paper `BlockLockCheckEvent`). `result` is `DEFAULT`, `ALLOW` or `DENY`.
+    record block-lock-check-event-data {
+        player: player,
+        block: block-pos,
+        item: item-stack,
+        event-result: string
+    }
+
+    /// A slot of a player's inventory changed (Paper `PlayerInventorySlotChangeEvent`).
+    record player-inventory-slot-change-event-data {
+        player: player,
+        raw-slot: s32,
+        old-item: item-stack,
+        new-item: item-stack,
+        should-trigger-advancements: bool
+    }
+
+    /// A player crafted an item (Paper `ItemCraftedEvent`).
+    record item-crafted-event-data {
+        player: player,
+        crafted-item: item-stack
+    }
+
+    /// A player selects a banner pattern in a loom (Paper `PlayerLoomPatternSelectEvent`).
+    record player-loom-pattern-select-event-data {
+        player: player,
+        pattern: string,
+        cancelled: bool
+    }
+
+    /// A player selects a stonecutter recipe (Paper `PlayerStonecutterRecipeSelectEvent`).
+    record player-stonecutter-recipe-select-event-data {
+        player: player,
+        recipe: string,
+        cancelled: bool
+    }
+
+    /// A player is granted an advancement criterion (Paper `PlayerAdvancementCriterionGrantEvent`).
+    record player-advancement-criterion-grant-event-data {
+        player: player,
+        advancement: string,
+        criterion: string,
+        cancelled: bool
+    }
+
+    /// A dragon fireball lands (Paper `EnderDragonFireballHitEvent`).
+    record ender-dragon-fireball-hit-event-data {
+        fireball: entity,
+        targets: list<entity>,
+        area-effect-cloud: entity,
+        cancelled: bool
+    }
+
+    /// A fishing hook changes state (Paper `FishHookStateChangeEvent`).
+    record fish-hook-state-change-event-data {
+        hook: entity,
+        new-hook-state: string
+    }
+
+    /// A splash water bottle lands (Paper `WaterBottleSplashEvent`).
+    record water-bottle-splash-event-data {
+        potion: entity,
+        to-damage: list<entity>,
+        cancelled: bool
+    }
+
+    /// A chat message is decorated (Paper `AsyncChatDecorateEvent`).
+    record async-chat-decorate-event-data {
+        player: player,
+        original-message: string,
+        event-result: string,
+        cancelled: bool
+    }
+
+    /// A connection sends its handshake (Paper `PlayerHandshakeEvent`). Leaving it cancelled keeps the default handling.
+    record player-handshake-event-data {
+        original-handshake: string,
+        server-hostname: string,
+        failed: bool,
+        fail-message: string,
+        cancelled: bool
+    }
+
+    /// A connection enters the configuration phase (Paper `PlayerConnectionInitialConfigureEvent`).
+    record player-connection-initial-configure-event-data {
+        name: string,
+        uuid: string
+    }
+
+    /// A connection is checked before it may join (Paper `PlayerConnectionValidateLoginEvent`). A kick message refuses it.
+    record player-connection-validate-login-event-data {
+        name: string,
+        uuid: string,
+        kick-message: option<string>
+    }
+
+    /// A connection is being configured; it finishes once the handlers ran (Paper `AsyncPlayerConnectionConfigureEvent`).
+    record async-player-connection-configure-event-data {
+        name: string,
+        uuid: string
+    }
+
+    /// A player asks for command completions (Paper `AsyncTabCompleteEvent`). A handled event replaces the server's completions.
+    record async-tab-complete-event-data {
+        player: player,
+        buffer: string,
+        completions: list<string>,
+        is-command: bool,
+        handled: bool,
+        cancelled: bool
+    }
+
+    /// Command completions are about to be sent (Paper `TabCompleteEvent`).
+    record tab-complete-event-data {
+        player: player,
+        buffer: string,
+        completions: list<string>,
+        cancelled: bool
+    }
+
+    /// Command suggestions are sent to a player (Paper `AsyncPlayerSendSuggestionsEvent`).
+    record async-player-send-suggestions-event-data {
+        player: player,
+        buffer: string,
+        suggestions: list<string>,
+        cancelled: bool
+    }
+
+    /// A player interacts with an entity the server does not know (Paper `PlayerUseUnknownEntityEvent`).
+    record player-use-unknown-entity-event-data {
+        player: player,
+        entity-id: s32,
+        attack: bool,
+        hand: string,
+        clicked-position: option<position>
+    }
+
+    /// A player changes a beacon's effects (Paper `PlayerChangeBeaconEffectEvent`).
+    record player-change-beacon-effect-event-data {
+        player: player,
+        beacon: block-pos,
+        primary: option<string>,
+        secondary: option<string>,
+        consume-item: bool,
+        cancelled: bool
+    }
+
+    /// A player edits a sign that is not in the world (Paper `UncheckedSignChangeEvent`).
+    record unchecked-sign-change-event-data {
+        player: player,
+        location: block-pos,
+        side: string,
+        lines: list<string>,
+        cancelled: bool
+    }
+
+    /// A joining player is checked against the player limit (Paper `PlayerServerFullCheckEvent`).
+    record player-server-full-check-event-data {
+        name: string,
+        uuid: string,
+        allowed: bool
+    }
+
+    /// A joining profile is checked against the whitelist (Paper `ProfileWhitelistVerifyEvent`).
+    record profile-whitelist-verify-event-data {
+        name: string,
+        uuid: string,
+        whitelisted: bool,
+        whitelist-enabled: bool,
+        is-op: bool,
+        kick-message: option<string>
+    }
+
+    /// A command arrives over RCON (Paper `RemoteServerCommandEvent`).
+    record remote-server-command-event-data {
+        command: string,
+        cancelled: bool
+    }
+
+    /// A plugin was enabled (Paper `PluginEnableEvent`).
+    record plugin-enable-event-data {
+        plugin-name: string
+    }
+
+    /// A plugin is being disabled (Paper `PluginDisableEvent`).
+    record plugin-disable-event-data {
+        plugin-name: string
+    }
+
+    /// Mobs may spawn around a player (Paper `PlayerNaturallySpawnCreaturesEvent`).
+    record player-naturally-spawn-creatures-event-data {
+        player: player,
+        radius: s32,
+        cancelled: bool
+    }
+
+    /// A block is destroyed without a player, for example by physics (Paper `BlockDestroyEvent`).
+    record block-destroy-event-data {
+        block: block-pos,
+        will-drop: bool,
+        play-effect: bool,
+        cancelled: bool
+    }
+
+    /// A mob is about to spawn naturally (Paper `PreCreatureSpawnEvent`).
+    record pre-creature-spawn-event-data {
+        location: position,
+        entity-type: string,
+        reason: string,
+        should-abort-spawn: bool,
+        cancelled: bool
+    }
+
+    /// A phantom is about to spawn for a player (Paper `PhantomPreSpawnEvent`).
+    record phantom-pre-spawn-event-data {
+        location: position,
+        entity: player,
+        should-abort-spawn: bool,
+        cancelled: bool
+    }
+
     record player-harvest-block-event-data {
         player: player,
         block-pos: block-pos,
@@ -2795,6 +3429,88 @@ interface event {
         world-difficulty-change-event,
         world-game-rule-change-event,
         server-resources-reloaded-event,
+        player-bed-fail-enter-event,
+        player-shear-block-event,
+        entity-construct-event,
+        entity-compost-item-event,
+        compost-item-event,
+        player-teleport-end-gateway-event,
+        entity-teleport-end-gateway-event,
+        player-lectern-page-change-event,
+        player-insert-lectern-book-event,
+        player-sign-command-preprocess-event,
+        pre-spawner-spawn-event,
+        block-break-block-event,
+        async-player-send-commands-event,
+        structures-locate-event,
+        whitelist-toggle-event,
+        whitelist-state-update-event,
+        world-border-bounds-change-event,
+        world-border-center-change-event,
+        unknown-command-event,
+        player-toggle-entity-age-lock-event,
+        item-transporting-entity-validate-target-event,
+        entity-fertilize-egg-event,
+        ender-dragon-flame-event,
+        ender-dragon-shoot-fireball-event,
+        entity-pushed-by-entity-attack-event,
+        player-attempt-pickup-item-event,
+        entity-attempt-spin-attack-event,
+        entity-equipment-changed-event,
+        entity-collide-with-entity-event,
+        tameable-death-message-event,
+        entity-effect-tick-event,
+        entity-damage-item-event,
+        slime-swim-event,
+        slime-change-direction-event,
+        slime-wander-event,
+        enderman-escape-event,
+        shulker-duplicate-event,
+        slime-target-living-entity-event,
+        entity-ignite-event,
+        sulfur-cube-swallow-item-event,
+        witch-throw-potion-event,
+        witch-consume-potion-event,
+        witch-ready-potion-event,
+        entity-portal-ready-event,
+        turtle-lay-egg-event,
+        turtle-start-digging-event,
+        turtle-go-home-event,
+        entity-zap-event,
+        entity-attempt-smash-attack-event,
+        player-set-spawn-event,
+        player-client-loaded-world-event,
+        player-chunk-load-event,
+        player-chunk-unload-event,
+        block-lock-check-event,
+        player-inventory-slot-change-event,
+        item-crafted-event,
+        player-loom-pattern-select-event,
+        player-stonecutter-recipe-select-event,
+        player-advancement-criterion-grant-event,
+        ender-dragon-fireball-hit-event,
+        fish-hook-state-change-event,
+        water-bottle-splash-event,
+        async-chat-decorate-event,
+        player-handshake-event,
+        player-connection-initial-configure-event,
+        player-connection-validate-login-event,
+        async-player-connection-configure-event,
+        async-tab-complete-event,
+        tab-complete-event,
+        async-player-send-suggestions-event,
+        player-use-unknown-entity-event,
+        player-change-beacon-effect-event,
+        unchecked-sign-change-event,
+        player-server-full-check-event,
+        profile-whitelist-verify-event,
+        remote-server-command-event,
+        plugin-enable-event,
+        plugin-disable-event,
+        player-naturally-spawn-creatures-event,
+        block-destroy-event,
+        pre-creature-spawn-event,
+        phantom-pre-spawn-event,
         player-harvest-block-event,
         player-hide-entity-event,
         player-item-break-event,
@@ -3134,6 +3850,88 @@ interface event {
         world-difficulty-change-event(world-difficulty-change-event-data),
         world-game-rule-change-event(world-game-rule-change-event-data),
         server-resources-reloaded-event(server-resources-reloaded-event-data),
+        player-bed-fail-enter-event(player-bed-fail-enter-event-data),
+        player-shear-block-event(player-shear-block-event-data),
+        entity-construct-event(entity-construct-event-data),
+        entity-compost-item-event(entity-compost-item-event-data),
+        compost-item-event(compost-item-event-data),
+        player-teleport-end-gateway-event(player-teleport-end-gateway-event-data),
+        entity-teleport-end-gateway-event(entity-teleport-end-gateway-event-data),
+        player-lectern-page-change-event(player-lectern-page-change-event-data),
+        player-insert-lectern-book-event(player-insert-lectern-book-event-data),
+        player-sign-command-preprocess-event(player-sign-command-preprocess-event-data),
+        pre-spawner-spawn-event(pre-spawner-spawn-event-data),
+        block-break-block-event(block-break-block-event-data),
+        async-player-send-commands-event(async-player-send-commands-event-data),
+        structures-locate-event(structures-locate-event-data),
+        whitelist-toggle-event(whitelist-toggle-event-data),
+        whitelist-state-update-event(whitelist-state-update-event-data),
+        world-border-bounds-change-event(world-border-bounds-change-event-data),
+        world-border-center-change-event(world-border-center-change-event-data),
+        unknown-command-event(unknown-command-event-data),
+        player-toggle-entity-age-lock-event(player-toggle-entity-age-lock-event-data),
+        item-transporting-entity-validate-target-event(item-transporting-entity-validate-target-event-data),
+        entity-fertilize-egg-event(entity-fertilize-egg-event-data),
+        ender-dragon-flame-event(ender-dragon-flame-event-data),
+        ender-dragon-shoot-fireball-event(ender-dragon-shoot-fireball-event-data),
+        entity-pushed-by-entity-attack-event(entity-pushed-by-entity-attack-event-data),
+        player-attempt-pickup-item-event(player-attempt-pickup-item-event-data),
+        entity-attempt-spin-attack-event(entity-attempt-spin-attack-event-data),
+        entity-equipment-changed-event(entity-equipment-changed-event-data),
+        entity-collide-with-entity-event(entity-collide-with-entity-event-data),
+        tameable-death-message-event(tameable-death-message-event-data),
+        entity-effect-tick-event(entity-effect-tick-event-data),
+        entity-damage-item-event(entity-damage-item-event-data),
+        slime-swim-event(slime-swim-event-data),
+        slime-change-direction-event(slime-change-direction-event-data),
+        slime-wander-event(slime-wander-event-data),
+        enderman-escape-event(enderman-escape-event-data),
+        shulker-duplicate-event(shulker-duplicate-event-data),
+        slime-target-living-entity-event(slime-target-living-entity-event-data),
+        entity-ignite-event(entity-ignite-event-data),
+        sulfur-cube-swallow-item-event(sulfur-cube-swallow-item-event-data),
+        witch-throw-potion-event(witch-throw-potion-event-data),
+        witch-consume-potion-event(witch-consume-potion-event-data),
+        witch-ready-potion-event(witch-ready-potion-event-data),
+        entity-portal-ready-event(entity-portal-ready-event-data),
+        turtle-lay-egg-event(turtle-lay-egg-event-data),
+        turtle-start-digging-event(turtle-start-digging-event-data),
+        turtle-go-home-event(turtle-go-home-event-data),
+        entity-zap-event(entity-zap-event-data),
+        entity-attempt-smash-attack-event(entity-attempt-smash-attack-event-data),
+        player-set-spawn-event(player-set-spawn-event-data),
+        player-client-loaded-world-event(player-client-loaded-world-event-data),
+        player-chunk-load-event(player-chunk-load-event-data),
+        player-chunk-unload-event(player-chunk-unload-event-data),
+        block-lock-check-event(block-lock-check-event-data),
+        player-inventory-slot-change-event(player-inventory-slot-change-event-data),
+        item-crafted-event(item-crafted-event-data),
+        player-loom-pattern-select-event(player-loom-pattern-select-event-data),
+        player-stonecutter-recipe-select-event(player-stonecutter-recipe-select-event-data),
+        player-advancement-criterion-grant-event(player-advancement-criterion-grant-event-data),
+        ender-dragon-fireball-hit-event(ender-dragon-fireball-hit-event-data),
+        fish-hook-state-change-event(fish-hook-state-change-event-data),
+        water-bottle-splash-event(water-bottle-splash-event-data),
+        async-chat-decorate-event(async-chat-decorate-event-data),
+        player-handshake-event(player-handshake-event-data),
+        player-connection-initial-configure-event(player-connection-initial-configure-event-data),
+        player-connection-validate-login-event(player-connection-validate-login-event-data),
+        async-player-connection-configure-event(async-player-connection-configure-event-data),
+        async-tab-complete-event(async-tab-complete-event-data),
+        tab-complete-event(tab-complete-event-data),
+        async-player-send-suggestions-event(async-player-send-suggestions-event-data),
+        player-use-unknown-entity-event(player-use-unknown-entity-event-data),
+        player-change-beacon-effect-event(player-change-beacon-effect-event-data),
+        unchecked-sign-change-event(unchecked-sign-change-event-data),
+        player-server-full-check-event(player-server-full-check-event-data),
+        profile-whitelist-verify-event(profile-whitelist-verify-event-data),
+        remote-server-command-event(remote-server-command-event-data),
+        plugin-enable-event(plugin-enable-event-data),
+        plugin-disable-event(plugin-disable-event-data),
+        player-naturally-spawn-creatures-event(player-naturally-spawn-creatures-event-data),
+        block-destroy-event(block-destroy-event-data),
+        pre-creature-spawn-event(pre-creature-spawn-event-data),
+        phantom-pre-spawn-event(phantom-pre-spawn-event-data),
         player-harvest-block-event(player-harvest-block-event-data),
         player-hide-entity-event(player-hide-entity-event-data),
         player-item-break-event(player-item-break-event-data),

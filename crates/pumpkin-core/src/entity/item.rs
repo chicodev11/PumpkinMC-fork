@@ -818,6 +818,7 @@ impl EntityBase for ItemEntity {
         true
     }
 
+    #[expect(clippy::too_many_lines)]
     fn on_player_collision(&self, player: &Arc<Player>) {
         if self.pickup_delay.load(Ordering::Relaxed) != 0
             || self
@@ -840,6 +841,22 @@ impl EntityBase for ItemEntity {
             }
             (stack.item.registry_key.to_string(), stack.item_count)
         };
+        // Paper `PlayerAttemptPickupItemEvent`
+        if let Some(event) = player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_attempt_pickup_item::PlayerAttemptPickupItemEvent {
+                player,
+                item_entity_id: self.entity.entity_id,
+                item: self
+                    .item_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+                cancelled: false,
+            }
+        }) && event.cancelled
+        {
+            return;
+        }
         if self.entity.world.load().cancelled_by_plugin(|| {
             crate::plugin::api::events::entity::entity_pickup_item::EntityPickupItemEvent::new(
                 player.entity_id(),

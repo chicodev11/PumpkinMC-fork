@@ -915,6 +915,24 @@ pub fn spawn_category_for_position(
                 ) && spawn_state.can_spawn(entity_type, &check_pos, world)
                 {
                     let spawn_pos_f64 = Vector3::new(xx, f64::from(y_start), zz);
+                    // Paper `PreCreatureSpawnEvent`: skip this mob, or abort the whole group
+                    if let Some(event) = world.plugin_event(|| {
+                        crate::plugin::api::events::entity::pre_creature_spawn::PreCreatureSpawnEvent {
+                            location: spawn_pos_f64,
+                            entity_type: format!("minecraft:{name}"),
+                            reason: "NATURAL".to_string(),
+                            should_abort_spawn: false,
+                            cancelled: false,
+                        }
+                    }) {
+                        if event.should_abort_spawn {
+                            return;
+                        }
+                        if event.cancelled {
+                            ll += 1;
+                            continue;
+                        }
+                    }
                     let entity = from_type(entity_type, spawn_pos_f64, world, Uuid::new_v4());
                     entity
                         .get_entity()

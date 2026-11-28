@@ -489,6 +489,31 @@ impl pumpkin_command::source::CommandSource for CommandSource {
         self.has_permission(permission)
     }
 
+    fn unknown_command(&self, input: &str, message: TextComponent) -> Option<TextComponent> {
+        // Paper `UnknownCommandEvent`
+        let server = self.server.as_ref()?;
+        if !server.plugin_manager.has_handlers::<
+            crate::plugin::api::events::server::unknown_command::UnknownCommandEvent,
+        >() {
+            return Some(message);
+        }
+        let original = message.clone().get_text();
+        let mut event = crate::plugin::api::events::server::unknown_command::UnknownCommandEvent {
+            player: match &self.output {
+                crate::command::CommandSender::Player(player) => Some(player.clone()),
+                _ => None,
+            },
+            command_line: input.to_string(),
+            message: Some(original.clone()),
+        };
+        server.plugin_manager.fire_blocking(server, &mut event);
+        match event.message {
+            None => None,
+            Some(text) if text == original => Some(message),
+            Some(text) => Some(TextComponent::text(text)),
+        }
+    }
+
     fn position(&self) -> Vector3<f64> {
         self.position
     }

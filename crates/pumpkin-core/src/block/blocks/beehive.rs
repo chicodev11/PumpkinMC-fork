@@ -85,6 +85,22 @@ impl BeehiveBlock {
                 },
             );
 
+        // Paper `PlayerShearBlockEvent`
+        match args.player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_shear_block::PlayerShearBlockEvent {
+                player,
+                block: *args.position,
+                item: args.item_stack.clone(),
+                hand: crate::entity::player::Player::equipment_slot_name(args.equipment_slot)
+                    .to_string(),
+                drops: drops.clone(),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return false,
+            Some(event) => drops = event.drops,
+            None => {}
+        }
         let mut event = PlayerHarvestBlockEvent {
             player: args.player.clone(),
             block_pos: *args.position,

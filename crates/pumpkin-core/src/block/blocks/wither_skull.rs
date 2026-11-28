@@ -77,6 +77,14 @@ pub fn find_wither_pattern(world: &Arc<World>, skull_pos: &BlockPos) -> Option<W
 }
 
 fn spawn_wither(world: &Arc<World>, pattern: &WitherPattern) {
+    let mut spawn_pos = pattern.center.to_centered_f64();
+    spawn_pos.y = f64::from(pattern.center.0.y) + 0.55;
+    let entity = Entity::new(world.clone(), spawn_pos, &EntityType::WITHER);
+    let wither = WitherEntity::new(entity);
+    let wither_entity: Arc<dyn crate::entity::EntityBase> = wither.clone();
+    if super::carved_pumpkin::construct_cancelled(world, &wither_entity, pattern.blocks.to_vec()) {
+        return;
+    }
     for pos in pattern.blocks {
         let state_id = world.get_block_state_id(&pos);
         world.set_block_state(
@@ -91,10 +99,6 @@ fn spawn_wither(world: &Arc<World>, pattern: &WitherPattern) {
         );
     }
 
-    let mut spawn_pos = pattern.center.to_centered_f64();
-    spawn_pos.y = f64::from(pattern.center.0.y) + 0.55;
-    let entity = Entity::new(world.clone(), spawn_pos, &EntityType::WITHER);
-    let wither = WitherEntity::new(entity);
     wither.make_invulnerable();
     world.spawn_entity(wither);
 

@@ -61,8 +61,13 @@ impl BlockBehaviour for ComposterBlock {
         if item_stack.get_data_component::<CompostableImpl>().is_some() && level < 8 {
             if level < 7 {
                 let count = item_stack.item_count;
-                let new_state_id =
-                    Self::insert_item(None, state_id, args.world, item_stack, args.position);
+                let new_state_id = Self::insert_item(
+                    Some(args.player.as_ref() as &dyn EntityBase),
+                    state_id,
+                    args.world,
+                    item_stack,
+                    args.position,
+                );
                 if args.player.has_infinite_materials() {
                     item_stack.set_count(count);
                 }
@@ -123,7 +128,31 @@ impl ComposterBlock {
             return state_id;
         }
 
-        let increased = level == 0 || rand::rng().random_bool(f64::from(chance));
+        let mut increased = level == 0 || rand::rng().random_bool(f64::from(chance));
+        // Paper `EntityCompostItemEvent` (an entity composts) / `CompostItemEvent` (a hopper)
+        if let Some(source) = source {
+            match world.entity_event(source.get_entity().entity_id, |entity| {
+                crate::plugin::api::events::entity::entity_compost_item::EntityCompostItemEvent {
+                    entity,
+                    block: *pos,
+                    item: stack.copy_with_count(1),
+                    will_raise_level: increased,
+                    cancelled: false,
+                }
+            }) {
+                Some(event) if event.cancelled => return state_id,
+                Some(event) => increased = event.will_raise_level,
+                None => {}
+            }
+        } else if let Some(event) = world.plugin_event(|| {
+            crate::plugin::api::events::block::compost_item::CompostItemEvent {
+                block: *pos,
+                item: stack.copy_with_count(1),
+                will_raise_level: increased,
+            }
+        }) {
+            increased = event.will_raise_level;
+        }
         stack.decrement(1);
         if !increased {
             return state_id;

@@ -27,16 +27,6 @@ impl crate::block::BlockBehaviour for PumpkinBlock {
                 .get_horizontal_facing()
                 .opposite()
         });
-        args.world.play_sound(
-            pumpkin_data::sound::Sound::BlockPumpkinCarve,
-            pumpkin_data::sound::SoundCategory::Blocks,
-            &args.position.to_f64(),
-        );
-        args.world.set_block_state(
-            args.position,
-            props.to_state_id(&Block::CARVED_PUMPKIN),
-            BlockFlags::NOTIFY_ALL,
-        );
         let drop_pos = args.position.to_centered_f64();
         let drops = args
             .world
@@ -54,6 +44,32 @@ impl crate::block::BlockBehaviour for PumpkinBlock {
                     crate::world::loot::generate_loot_from_handle(&handle, 0, &params)
                 },
             );
+        // Paper `PlayerShearBlockEvent`: change the drops or cancel the carving
+        let drops = match args.player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_shear_block::PlayerShearBlockEvent {
+                player,
+                block: *args.position,
+                item: args.item_stack.clone(),
+                hand: crate::entity::player::Player::equipment_slot_name(args.equipment_slot)
+                    .to_string(),
+                drops: drops.clone(),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return BlockActionResult::PassToDefaultBlockAction,
+            Some(event) => event.drops,
+            None => drops,
+        };
+        args.world.play_sound(
+            pumpkin_data::sound::Sound::BlockPumpkinCarve,
+            pumpkin_data::sound::SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(&Block::CARVED_PUMPKIN),
+            BlockFlags::NOTIFY_ALL,
+        );
         for drop_stack in drops {
             let entity = Entity::new(args.world.clone(), drop_pos, &EntityType::ITEM);
             let item_entity = Arc::new(ItemEntity::new(entity, drop_stack));

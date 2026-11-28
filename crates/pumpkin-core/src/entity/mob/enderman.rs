@@ -240,8 +240,24 @@ impl EndermanEntity {
         }
     }
 
+    /// Paper `EndermanEscapeEvent`: `false` when a plugin cancelled this escape.
+    pub fn escape_allowed(&self, reason: &str) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
+        !entity
+            .world
+            .load()
+            .entity_event(entity.entity_id, |enderman| {
+                crate::plugin::api::events::entity::enderman_escape::EndermanEscapeEvent {
+                    enderman,
+                    reason: reason.to_string(),
+                    cancelled: false,
+                }
+            })
+            .is_some_and(|event| event.cancelled)
+    }
+
     fn repeatedly_try_to_teleport(&self) {
-        if !self.mob_entity.living_entity.entity.has_vehicle() {
+        if !self.mob_entity.living_entity.entity.has_vehicle() && self.escape_allowed("INDIRECT") {
             for _ in 0..TELEPORT_ATTEMPTS {
                 if self.teleport_randomly() {
                     return;
@@ -549,7 +565,9 @@ impl Mob for EndermanEntity {
             && self.get_random().random::<f32>() * 30.0 < (brightness - 0.4) * 2.0
         {
             self.set_target(None);
-            self.teleport_randomly();
+            if self.escape_allowed("RUNAWAY") {
+                self.teleport_randomly();
+            }
         }
     }
 
@@ -602,7 +620,7 @@ impl Mob for EndermanEntity {
     /// Runs after the damage attempt even when it was blocked.
     fn post_damage_with_context(
         &self,
-        _damage_type: DamageType,
+        damage_type: DamageType,
         source: Option<&dyn EntityBase>,
         cause: Option<&dyn EntityBase>,
     ) {
@@ -616,7 +634,13 @@ impl Mob for EndermanEntity {
         {
             return;
         }
-        if self.get_random().random_range(0..10) != 0 {
+        if self.get_random().random_range(0..10) != 0
+            && self.escape_allowed(if damage_type == DamageType::DROWN {
+                "DROWN"
+            } else {
+                "CRITICAL_HIT"
+            })
+        {
             self.teleport_randomly();
         }
     }

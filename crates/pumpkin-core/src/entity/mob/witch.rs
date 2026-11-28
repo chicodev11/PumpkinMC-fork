@@ -192,7 +192,23 @@ impl WitchEntity {
             }
         }
 
-        let potion_stack = create_potion_stack(&Item::SPLASH_POTION, potion);
+        let mut potion_stack = create_potion_stack(&Item::SPLASH_POTION, potion);
+        // Paper `WitchThrowPotionEvent`: change the potion, or cancel the throw
+        match world.entity_event(entity.entity_id, |witch| {
+            crate::plugin::api::events::entity::witch_throw_potion::WitchThrowPotionEvent {
+                witch,
+                target: target.clone(),
+                potion: Some(potion_stack.clone()),
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => return,
+            Some(event) => match event.potion {
+                Some(stack) if !stack.is_empty() => potion_stack = stack,
+                _ => return,
+            },
+            None => {}
+        }
 
         let splash_entity = Entity::new(world.clone(), witch_pos, &EntityType::SPLASH_POTION);
         let splash = SplashPotionEntity::new_shot(splash_entity, entity);
@@ -250,6 +266,7 @@ impl Mob for WitchEntity {
         amount
     }
 
+    #[expect(clippy::too_many_lines)]
     fn mob_tick(&self, caller: &dyn EntityBase) {
         // Vanilla `aiStep`: `healRaidersGoal.decrementCooldown()`; the player goal only
         // runs once it reaches 0 (read by `NearestAttackableWitchTargetGoal`).
@@ -278,6 +295,21 @@ impl Mob for WitchEntity {
                         ItemStack::EMPTY.clone(),
                     )]);
 
+                    // Paper `WitchConsumePotionEvent`: change the potion, or cancel its effects
+                    let stack = match world.entity_event(entity.entity_id, |witch| {
+                        crate::plugin::api::events::entity::witch_consume_potion::WitchConsumePotionEvent {
+                            witch,
+                            potion: Some(stack.clone()),
+                            cancelled: false,
+                        }
+                    }) {
+                        Some(event) if event.cancelled => return,
+                        Some(event) => match event.potion {
+                            Some(stack) => stack,
+                            None => return,
+                        },
+                        None => stack,
+                    };
                     let effects = crate::item::potion::PotionContents::read_potion_effects(&stack);
                     crate::item::potion::PotionContents::apply_effects_to(
                         living,
@@ -317,6 +349,21 @@ impl Mob for WitchEntity {
 
             if let Some(potion) = potion {
                 let stack = create_potion_stack(&Item::POTION, potion);
+                // Paper `WitchReadyPotionEvent`: change the potion, or cancel drinking
+                let stack = match world.entity_event(entity.entity_id, |witch| {
+                    crate::plugin::api::events::entity::witch_ready_potion::WitchReadyPotionEvent {
+                        witch,
+                        potion: Some(stack.clone()),
+                        cancelled: false,
+                    }
+                }) {
+                    Some(event) if event.cancelled => return,
+                    Some(event) => match event.potion {
+                        Some(stack) if !stack.is_empty() => stack,
+                        _ => return,
+                    },
+                    None => stack,
+                };
                 if let Some(witch) = caller.cast_any().downcast_ref::<Self>() {
                     let living = &witch.mob_entity.living_entity;
                     let mut equipment = living

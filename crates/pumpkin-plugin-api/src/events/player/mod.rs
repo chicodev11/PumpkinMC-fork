@@ -204,8 +204,96 @@ pub mod player_stop_spectating_entity;
 /// Player Swap With Equipment Slot event.
 pub mod player_swap_with_equipment_slot;
 
+/// Player Bed Fail Enter event.
+pub mod player_bed_fail_enter;
+
+/// Player Shear Block event.
+pub mod player_shear_block;
+
+/// Player Teleport End Gateway event.
+pub mod player_teleport_end_gateway;
+
+/// Player Lectern Page Change event.
+pub mod player_lectern_page_change;
+
+/// Player Insert Lectern Book event.
+pub mod player_insert_lectern_book;
+
+/// Player Sign Command Preprocess event.
+pub mod player_sign_command_preprocess;
+
+/// Async Player Send Commands event.
+pub mod async_player_send_commands;
+
+/// Player Toggle Entity Age Lock event.
+pub mod player_toggle_entity_age_lock;
+
+/// Player Attempt Pickup Item event.
+pub mod player_attempt_pickup_item;
+
+/// Player Set Spawn event.
+pub mod player_set_spawn;
+
+/// Player Client Loaded World event.
+pub mod player_client_loaded_world;
+
+/// Player Chunk Load event.
+pub mod player_chunk_load;
+
+/// Player Chunk Unload event.
+pub mod player_chunk_unload;
+
+/// Player Inventory Slot Change event.
+pub mod player_inventory_slot_change;
+
+/// Player Loom Pattern Select event.
+pub mod player_loom_pattern_select;
+
+/// Player Stonecutter Recipe Select event.
+pub mod player_stonecutter_recipe_select;
+
+/// Player Advancement Criterion Grant event.
+pub mod player_advancement_criterion_grant;
+
+/// Async Chat Decorate event.
+pub mod async_chat_decorate;
+
+/// Player Handshake event.
+pub mod player_handshake;
+
+/// Player Connection Initial Configure event.
+pub mod player_connection_initial_configure;
+
+/// Player Connection Validate Login event.
+pub mod player_connection_validate_login;
+
+/// Async Player Connection Configure event.
+pub mod async_player_connection_configure;
+
+/// Async Player Send Suggestions event.
+pub mod async_player_send_suggestions;
+
+/// Player Use Unknown Entity event.
+pub mod player_use_unknown_entity;
+
+/// Player Change Beacon Effect event.
+pub mod player_change_beacon_effect;
+
+/// Unchecked Sign Change event.
+pub mod unchecked_sign_change;
+
+/// Player Server Full Check event.
+pub mod player_server_full_check;
+
+/// Player Naturally Spawn Creatures event.
+pub mod player_naturally_spawn_creatures;
+
+pub use async_chat_decorate::*;
 pub use async_player_chat::*;
+pub use async_player_connection_configure::*;
 pub use async_player_pre_login::*;
+pub use async_player_send_commands::*;
+pub use async_player_send_suggestions::*;
 pub use bedrock_form_response::*;
 pub use changed_main_hand::*;
 pub use client_item_view::*;
@@ -216,23 +304,32 @@ pub use fish::*;
 pub use inventory_click::*;
 pub use inventory_close::*;
 pub use item_held::*;
+pub use player_advancement_criterion_grant::*;
 pub use player_advancement_done::*;
 pub use player_animation::*;
 pub use player_arm_swing::*;
 pub use player_armor_change::*;
 pub use player_armor_stand_manipulate::*;
 pub use player_attack_entity_cooldown_reset::*;
+pub use player_attempt_pickup_item::*;
 pub use player_bed::*;
+pub use player_bed_fail_enter::*;
 pub use player_bucket::*;
 pub use player_bucket_entity::*;
+pub use player_change_beacon_effect::*;
 pub use player_change_world::*;
 pub use player_changed_world::*;
 pub use player_channel::*;
 pub use player_chat::*;
+pub use player_chunk_load::*;
+pub use player_chunk_unload::*;
+pub use player_client_loaded_world::*;
 pub use player_client_options_change::*;
 pub use player_command_preprocess::*;
 pub use player_command_send::*;
 pub use player_connection_close::*;
+pub use player_connection_initial_configure::*;
+pub use player_connection_validate_login::*;
 pub use player_cookie_response::*;
 pub use player_custom_payload::*;
 pub use player_deep_sleep::*;
@@ -242,13 +339,16 @@ pub use player_elytra_boost::*;
 pub use player_exp_cooldown_change::*;
 pub use player_flower_pot_manipulate::*;
 pub use player_gamemode_change::*;
+pub use player_handshake::*;
 pub use player_harvest_block::*;
 pub use player_hide_entity::*;
 pub use player_input::*;
+pub use player_insert_lectern_book::*;
 pub use player_interact::*;
 pub use player_interact_at_entity::*;
 pub use player_interact_entity::*;
 pub use player_interact_unknown_entity::*;
+pub use player_inventory_slot_change::*;
 pub use player_item_break::*;
 pub use player_item_consume::*;
 pub use player_item_cooldown::*;
@@ -262,13 +362,16 @@ pub use player_kick::*;
 pub use player_launch_projectile::*;
 pub use player_leash_entity::*;
 pub use player_leave::*;
+pub use player_lectern_page_change::*;
 pub use player_level_change::*;
 pub use player_links_send::*;
 pub use player_locale_change::*;
 pub use player_login::*;
+pub use player_loom_pattern_select::*;
 pub use player_map_filled::*;
 pub use player_move::*;
 pub use player_name_entity::*;
+pub use player_naturally_spawn_creatures::*;
 pub use player_open_sign::*;
 pub use player_permission_check::*;
 pub use player_pickup_arrow::*;
@@ -284,19 +387,26 @@ pub use player_register_channel::*;
 pub use player_resource_pack_status::*;
 pub use player_respawn::*;
 pub use player_riptide::*;
+pub use player_server_full_check::*;
+pub use player_set_spawn::*;
+pub use player_shear_block::*;
 pub use player_shear_entity::*;
 pub use player_shield_disable::*;
 pub use player_show_entity::*;
+pub use player_sign_command_preprocess::*;
 pub use player_spawn_change::*;
 pub use player_spawn_location::*;
 pub use player_start_spectating_entity::*;
 pub use player_statistic_increment::*;
+pub use player_stonecutter_recipe_select::*;
 pub use player_stop_spectating_entity::*;
 pub use player_stop_using_item::*;
 pub use player_swap_hands::*;
 pub use player_swap_with_equipment_slot::*;
 pub use player_take_lectern_book::*;
 pub use player_teleport::*;
+pub use player_teleport_end_gateway::*;
+pub use player_toggle_entity_age_lock::*;
 pub use player_toggle_flight::*;
 pub use player_toggle_sneak::*;
 pub use player_toggle_sprint::*;
@@ -304,5 +414,7 @@ pub use player_track_entity::*;
 pub use player_unleash_entity::*;
 pub use player_unregister_channel::*;
 pub use player_untrack_entity::*;
+pub use player_use_unknown_entity::*;
 pub use player_velocity::*;
 pub use pre_player_attack_entity::*;
+pub use unchecked_sign_change::*;

@@ -182,6 +182,117 @@ pub mod skeleton_horse_trap;
 /// Thrown Egg Hatch event.
 pub mod thrown_egg_hatch;
 
+/// Entity Construct event.
+pub mod entity_construct;
+
+/// Entity Compost Item event.
+pub mod entity_compost_item;
+
+/// Entity Teleport End Gateway event.
+pub mod entity_teleport_end_gateway;
+
+/// Pre Spawner Spawn event.
+pub mod pre_spawner_spawn;
+
+/// Item Transporting Entity Validate Target event.
+pub mod item_transporting_entity_validate_target;
+
+/// Entity Fertilize Egg event.
+pub mod entity_fertilize_egg;
+
+/// Ender Dragon Flame event.
+pub mod ender_dragon_flame;
+
+/// Ender Dragon Shoot Fireball event.
+pub mod ender_dragon_shoot_fireball;
+
+/// Entity Pushed By Entity Attack event.
+pub mod entity_pushed_by_entity_attack;
+
+/// Entity Attempt Spin Attack event.
+pub mod entity_attempt_spin_attack;
+
+/// Entity Equipment Changed event.
+pub mod entity_equipment_changed;
+
+/// Entity Collide With Entity event.
+pub mod entity_collide_with_entity;
+
+/// Tameable Death Message event.
+pub mod tameable_death_message;
+
+/// Entity Effect Tick event.
+pub mod entity_effect_tick;
+
+/// Entity Damage Item event.
+pub mod entity_damage_item;
+
+/// Slime Swim event.
+pub mod slime_swim;
+
+/// Slime Change Direction event.
+pub mod slime_change_direction;
+
+/// Slime Wander event.
+pub mod slime_wander;
+
+/// Enderman Escape event.
+pub mod enderman_escape;
+
+/// Shulker Duplicate event.
+pub mod shulker_duplicate;
+
+/// Slime Target Living Entity event.
+pub mod slime_target_living_entity;
+
+/// Entity Ignite event.
+pub mod entity_ignite;
+
+/// Sulfur Cube Swallow Item event.
+pub mod sulfur_cube_swallow_item;
+
+/// Witch Throw Potion event.
+pub mod witch_throw_potion;
+
+/// Witch Consume Potion event.
+pub mod witch_consume_potion;
+
+/// Witch Ready Potion event.
+pub mod witch_ready_potion;
+
+/// Entity Portal Ready event.
+pub mod entity_portal_ready;
+
+/// Turtle Lay Egg event.
+pub mod turtle_lay_egg;
+
+/// Turtle Start Digging event.
+pub mod turtle_start_digging;
+
+/// Turtle Go Home event.
+pub mod turtle_go_home;
+
+/// Entity Zap event.
+pub mod entity_zap;
+
+/// Entity Attempt Smash Attack event.
+pub mod entity_attempt_smash_attack;
+
+/// Ender Dragon Fireball Hit event.
+pub mod ender_dragon_fireball_hit;
+
+/// Fish Hook State Change event.
+pub mod fish_hook_state_change;
+
+/// Water Bottle Splash event.
+pub mod water_bottle_splash;
+
+/// Pre Creature Spawn event.
+pub mod pre_creature_spawn;
+
+/// Phantom Pre Spawn event.
+pub mod phantom_pre_spawn;
+
 pub use area_effect_cloud_apply::*;
 pub use arrow_body_count_change::*;
 pub use bat_toggle_sleep::*;
@@ -190,26 +301,40 @@ pub use creeper_ignite::*;
 pub use creeper_power::*;
 pub use elder_guardian_appearance::*;
 pub use ender_dragon_change_phase::*;
+pub use ender_dragon_fireball_hit::*;
+pub use ender_dragon_flame::*;
+pub use ender_dragon_shoot_fireball::*;
 pub use enderman_attack_player::*;
+pub use enderman_escape::*;
 pub use entity_add_to_world::*;
 pub use entity_air_change::*;
+pub use entity_attempt_smash_attack::*;
+pub use entity_attempt_spin_attack::*;
 pub use entity_break_door::*;
 pub use entity_breed::*;
 pub use entity_change_block::*;
+pub use entity_collide_with_entity::*;
 pub use entity_combust::*;
 pub use entity_combust_by_block::*;
 pub use entity_combust_by_entity::*;
+pub use entity_compost_item::*;
+pub use entity_construct::*;
 pub use entity_damage::*;
 pub use entity_damage_by_block::*;
 pub use entity_damage_by_entity::*;
+pub use entity_damage_item::*;
 pub use entity_death::*;
 pub use entity_dismount::*;
 pub use entity_drop_item::*;
 pub use entity_dye::*;
+pub use entity_effect_tick::*;
 pub use entity_enter_block::*;
 pub use entity_enter_love_mode::*;
+pub use entity_equipment_changed::*;
 pub use entity_exhaustion::*;
 pub use entity_explode::*;
+pub use entity_fertilize_egg::*;
+pub use entity_ignite::*;
 pub use entity_inside_block::*;
 pub use entity_interact::*;
 pub use entity_jump::*;
@@ -224,8 +349,10 @@ pub use entity_place::*;
 pub use entity_portal::*;
 pub use entity_portal_enter::*;
 pub use entity_portal_exit::*;
+pub use entity_portal_ready::*;
 pub use entity_pose_change::*;
 pub use entity_potion_effect::*;
+pub use entity_pushed_by_entity_attack::*;
 pub use entity_regain_health::*;
 pub use entity_remove::*;
 pub use entity_remove_from_world::*;
@@ -238,38 +365,59 @@ pub use entity_target::*;
 pub use entity_target_block::*;
 pub use entity_target_living_entity::*;
 pub use entity_teleport::*;
+pub use entity_teleport_end_gateway::*;
 pub use entity_toggle_glide::*;
 pub use entity_toggle_sit::*;
 pub use entity_toggle_swim::*;
 pub use entity_transform::*;
 pub use entity_unleash::*;
+pub use entity_zap::*;
 pub use exp_bottle::*;
 pub use experience_orb_merge::*;
 pub use explosion_prime::*;
 pub use firework_explode::*;
+pub use fish_hook_state_change::*;
 pub use food_level_change::*;
 pub use horse_jump::*;
 pub use item_despawn::*;
 pub use item_merge::*;
 pub use item_spawn::*;
+pub use item_transporting_entity_validate_target::*;
 pub use lingering_potion_splash::*;
+pub use phantom_pre_spawn::*;
 pub use pig_zap::*;
 pub use pig_zombie_anger::*;
 pub use piglin_barter::*;
 pub use potion_splash::*;
+pub use pre_creature_spawn::*;
+pub use pre_spawner_spawn::*;
 pub use projectile_hit::*;
 pub use projectile_launch::*;
 pub use puffer_fish_state_change::*;
 pub use sheep_dye_wool::*;
 pub use sheep_regrow_wool::*;
+pub use shulker_duplicate::*;
 pub use skeleton_horse_trap::*;
+pub use slime_change_direction::*;
 pub use slime_split::*;
+pub use slime_swim::*;
+pub use slime_target_living_entity::*;
+pub use slime_wander::*;
 pub use spawner_spawn::*;
 pub use strider_temperature_change::*;
+pub use sulfur_cube_swallow_item::*;
+pub use tameable_death_message::*;
 pub use thrown_egg_hatch::*;
 pub use trial_spawner_spawn::*;
+pub use turtle_go_home::*;
+pub use turtle_lay_egg::*;
+pub use turtle_start_digging::*;
 pub use villager_acquire_trade::*;
 pub use villager_career_change::*;
 pub use villager_replenish_trade::*;
 pub use villager_reputation_change::*;
 pub use warden_anger_change::*;
+pub use water_bottle_splash::*;
+pub use witch_consume_potion::*;
+pub use witch_ready_potion::*;
+pub use witch_throw_potion::*;

@@ -26,6 +26,8 @@ pub struct FishingBobberEntity {
     pub entity: Entity,
     pub owner: ProjectileOwner,
     pub hooked_entity_id: AtomicI32,
+    /// Last state reported by Paper `FishHookStateChangeEvent`: 0 flying, 1 hooked, 2 bobbing.
+    hook_state: std::sync::atomic::AtomicU8,
     pub in_ground: AtomicBool,
     pub has_hit: AtomicBool,
     pub wait_countdown: AtomicI32,
@@ -52,6 +54,7 @@ impl FishingBobberEntity {
             entity,
             owner: ProjectileOwner::new(Some(&owner.living_entity.entity)),
             hooked_entity_id: AtomicI32::new(0),
+            hook_state: std::sync::atomic::AtomicU8::new(0),
             in_ground: AtomicBool::new(false),
             has_hit: AtomicBool::new(false),
             wait_countdown: AtomicI32::new(wait_ticks),
@@ -160,6 +163,25 @@ impl FishingBobberEntity {
         let entity = self.get_entity();
         let world = entity.world.load();
         self.owner.tick(entity);
+
+        // Paper `FishHookStateChangeEvent`: the state vanilla's `FishingHook.currentState`
+        // tracks, reported when it changes
+        let state = if self.hooked_entity_id.load(Ordering::Relaxed) != 0 {
+            1
+        } else if entity.touching_water.load(Ordering::Relaxed) {
+            2
+        } else {
+            0
+        };
+        if self.hook_state.swap(state, Ordering::Relaxed) != state {
+            world.entity_event(entity.entity_id, |hook| {
+                crate::plugin::api::events::entity::fish_hook_state_change::FishHookStateChangeEvent {
+                    hook,
+                    new_hook_state: ["UNHOOKED", "HOOKED_ENTITY", "BOBBING"][state as usize]
+                        .to_string(),
+                }
+            });
+        }
 
         if self.in_ground.load(Ordering::Relaxed) {
             return;

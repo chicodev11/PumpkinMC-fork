@@ -359,17 +359,20 @@ impl ChunkSender {
         self.pending_chunks.insert(pos);
     }
 
-    pub fn unload_chunk(&mut self, client: &ClientPlatform, pos: Vector2<i32>) {
+    /// Returns whether the client had the chunk.
+    pub fn unload_chunk(&mut self, client: &ClientPlatform, pos: Vector2<i32>) -> bool {
         self.pending_chunks.remove(&pos);
         self.awaiting_delivery.remove(&pos);
         self.encode_failures.remove(&pos);
         self.parked_chunks.remove(&pos);
-        if self.sent_chunks.remove(&pos)
+        let sent = self.sent_chunks.remove(&pos);
+        if sent
             && let ClientPlatform::Java(java_client) = client
             && !java_client.is_closed()
         {
             java_client.try_send_packet(&CUnloadChunk::new(pos.x, pos.y));
         }
+        sent
     }
 
     fn collect_sorted_candidates(

@@ -135,17 +135,30 @@ pub fn update_position(player: &Arc<Player>) {
     };
     drop(held_tickets);
 
-    {
+    let unloaded: Vec<_> = {
         let mut sender = player
             .chunk_sender
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for pos in &unloading_chunks {
-            sender.unload_chunk(&player.client, *pos);
-        }
+        let unloaded = unloading_chunks
+            .iter()
+            .filter(|pos| sender.unload_chunk(&player.client, **pos))
+            .copied()
+            .collect();
         for pos in &loading_chunks {
             sender.enqueue_chunk(*pos);
         }
+        unloaded
+    };
+    // Paper `PlayerChunkUnloadEvent`
+    for pos in unloaded {
+        player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_chunk_unload::PlayerChunkUnloadEvent {
+                player,
+                chunk_x: pos.x,
+                chunk_z: pos.y,
+            }
+        });
     }
     player.watched_section.store(new_cylindrical);
 

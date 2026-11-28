@@ -20,6 +20,11 @@ pub trait LecternController: Send + Sync {
     /// Clamps and persists `page`, emitting a redstone pulse when it changes.
     fn set_page(&self, page: i32);
 
+    /// The page `player` turns to (Paper `PlayerLecternPageChangeEvent`), `None` when cancelled.
+    fn page_change(&self, _player: &dyn InventoryPlayer, _old: i32, new: i32) -> Option<i32> {
+        Some(new)
+    }
+
     /// Restores the bookless block state after the book was taken.
     fn on_book_taken(&self);
 
@@ -98,11 +103,17 @@ impl ScreenHandler for LecternScreenHandler {
     fn on_button_click(&mut self, player: &dyn InventoryPlayer, id: i32) -> bool {
         match id {
             Self::PREVIOUS_PAGE_BUTTON_ID => {
-                self.controller.set_page(self.controller.current_page() - 1);
+                let old = self.controller.current_page();
+                if let Some(page) = self.controller.page_change(player, old, old - 1) {
+                    self.controller.set_page(page);
+                }
                 true
             }
             Self::NEXT_PAGE_BUTTON_ID => {
-                self.controller.set_page(self.controller.current_page() + 1);
+                let old = self.controller.current_page();
+                if let Some(page) = self.controller.page_change(player, old, old + 1) {
+                    self.controller.set_page(page);
+                }
                 true
             }
             Self::TAKE_BOOK_BUTTON_ID => {
@@ -121,7 +132,13 @@ impl ScreenHandler for LecternScreenHandler {
                 true
             }
             _ if id >= Self::JUMP_TO_PAGE_OFFSET => {
-                self.controller.set_page(id - Self::JUMP_TO_PAGE_OFFSET);
+                let old = self.controller.current_page();
+                if let Some(page) =
+                    self.controller
+                        .page_change(player, old, id - Self::JUMP_TO_PAGE_OFFSET)
+                {
+                    self.controller.set_page(page);
+                }
                 true
             }
             _ => false,

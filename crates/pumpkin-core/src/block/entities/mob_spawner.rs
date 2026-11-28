@@ -233,6 +233,23 @@ impl MobSpawnerBlockEntity {
                 if !allowed {
                     continue;
                 }
+                // Paper `PreSpawnerSpawnEvent`
+                if let Some(event) = world.plugin_event(|| {
+                    crate::plugin::api::events::entity::pre_spawner_spawn::PreSpawnerSpawnEvent {
+                        location: spawn_pos,
+                        entity_type: format!("minecraft:{}", entity_type.resource_name),
+                        spawner_location: position,
+                        should_abort_spawn: false,
+                        cancelled: false,
+                    }
+                }) {
+                    if event.should_abort_spawn {
+                        break;
+                    }
+                    if event.cancelled {
+                        continue;
+                    }
+                }
                 let entity = crate::entity::r#type::from_type(
                     entity_type,
                     spawn_pos,

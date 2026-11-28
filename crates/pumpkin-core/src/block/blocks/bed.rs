@@ -238,6 +238,29 @@ impl BedBlock {
         true
     }
 
+    /// Paper `PlayerBedFailEnterEvent`: `None` when a plugin cancelled the failure's message
+    /// or explosion, otherwise whether the bed still explodes.
+    fn bed_fail(
+        player: &Arc<Player>,
+        bed: BlockPos,
+        reason: &str,
+        will_explode: bool,
+    ) -> Option<bool> {
+        match player.plugin_event(|player| {
+            crate::plugin::api::events::player::player_bed_fail_enter::PlayerBedFailEnterEvent {
+                player,
+                fail_reason: reason.to_string(),
+                bed,
+                will_explode,
+                cancelled: false,
+            }
+        }) {
+            Some(event) if event.cancelled => None,
+            Some(event) => Some(event.will_explode),
+            None => Some(will_explode),
+        }
+    }
+
     #[expect(clippy::too_many_lines)]
     fn use_bed(
         world: &Arc<World>,
@@ -259,6 +282,9 @@ impl BedBlock {
 
         // Explode if bed rule explodes (EnvironmentAttributes.BED_RULE)
         if world.dimension.bed_rule.explodes {
+            if Self::bed_fail(player, bed_head_pos, "NOT_POSSIBLE_HERE", true) != Some(true) {
+                return BlockActionResult::SuccessServer;
+            }
             world.break_block(&bed_head_pos, None, BlockFlags::SKIP_DROPS);
             world.break_block(&bed_foot_pos, None, BlockFlags::SKIP_DROPS);
 
@@ -283,7 +309,9 @@ impl BedBlock {
         // Vanilla checks `OCCUPIED` before `startSleepInBed`: a sleeping villager is woken up,
         // anyone else gets the message.
         if bed_props.occupied {
-            if !Self::kick_villager_out_of_bed(world, &bed_head_pos) {
+            if !Self::kick_villager_out_of_bed(world, &bed_head_pos)
+                && Self::bed_fail(player, bed_head_pos, "OTHER_PROBLEM", false).is_some()
+            {
                 player.send_system_message_raw(
                     &pumpkin_macros::translate_cross!(
                         translation::java::BLOCK_MINECRAFT_BED_OCCUPIED,
@@ -309,13 +337,15 @@ impl BedBlock {
                 .position()
                 .is_within_bounds(bed_foot_pos.to_f64(), 3.0, 3.0, 3.0)
         {
-            player.send_system_message_raw(
-                &pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
-                    translation::bedrock::TILE_BED_TOOFAR
-                ),
-                true,
-            );
+            if Self::bed_fail(player, bed_head_pos, "TOO_FAR_AWAY", false).is_some() {
+                player.send_system_message_raw(
+                    &pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
+                        translation::bedrock::TILE_BED_TOOFAR
+                    ),
+                    true,
+                );
+            }
             return BlockActionResult::SuccessServer;
         }
 
@@ -323,13 +353,15 @@ impl BedBlock {
         if world.get_block_state(&bed_head_pos.up()).is_solid()
             || world.get_block_state(&bed_foot_pos.up()).is_solid()
         {
-            player.send_system_message_raw(
-                &pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
-                    translation::bedrock::TILE_BED_OBSTRUCTED
-                ),
-                true,
-            );
+            if Self::bed_fail(player, bed_head_pos, "OBSTRUCTED", false).is_some() {
+                player.send_system_message_raw(
+                    &pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
+                        translation::bedrock::TILE_BED_OBSTRUCTED
+                    ),
+                    true,
+                );
+            }
             return BlockActionResult::SuccessServer;
         }
 
@@ -351,13 +383,15 @@ impl BedBlock {
 
         // Make sure the time and weather allows sleep
         if !can_sleep {
-            player.send_system_message_raw(
-                &pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
-                    translation::bedrock::TILE_BED_NOSLEEP
-                ),
-                true,
-            );
+            if Self::bed_fail(player, bed_head_pos, "NOT_POSSIBLE_NOW", false).is_some() {
+                player.send_system_message_raw(
+                    &pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
+                        translation::bedrock::TILE_BED_NOSLEEP
+                    ),
+                    true,
+                );
+            }
             return BlockActionResult::SuccessServer;
         }
 
@@ -375,13 +409,15 @@ impl BedBlock {
             if pos.is_within_bounds(bed_head_pos.to_f64(), 8.0, 5.0, 8.0)
                 || pos.is_within_bounds(bed_foot_pos.to_f64(), 8.0, 5.0, 8.0)
             {
-                player.send_system_message_raw(
-                    &pumpkin_macros::translate_cross!(
-                        translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
-                        translation::bedrock::TILE_BED_NOTSAFE
-                    ),
-                    true,
-                );
+                if Self::bed_fail(player, bed_head_pos, "NOT_SAFE", false).is_some() {
+                    player.send_system_message_raw(
+                        &pumpkin_macros::translate_cross!(
+                            translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
+                            translation::bedrock::TILE_BED_NOTSAFE
+                        ),
+                        true,
+                    );
+                }
                 return BlockActionResult::SuccessServer;
             }
         }
